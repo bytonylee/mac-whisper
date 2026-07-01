@@ -27,36 +27,36 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
                 switch self {
                 case .microphone: return "Capture your voice."
                 case .speech: return "Transcribe speech to text."
-                case .inputMonitoring: return "Detect the Fn key. In Settings, click + and add Mac Whisper."
-                case .accessibility: return "Insert text into other apps. In Settings, click + and add Mac Whisper."
+                case .inputMonitoring: return "Detect the Fn key. Toggle Mac Whisper on in the list."
+                case .accessibility: return "Insert text into other apps. Toggle Mac Whisper on in the list."
                 }
             case .korean:
                 switch self {
                 case .microphone: return "음성을 녹음합니다."
                 case .speech: return "음성을 텍스트로 변환합니다."
-                case .inputMonitoring: return "Fn 키 입력을 감지합니다. 설정에서 +를 눌러 Mac Whisper를 추가하세요."
-                case .accessibility: return "다른 앱에 텍스트를 입력합니다. 설정에서 +를 눌러 Mac Whisper를 추가하세요."
+                case .inputMonitoring: return "Fn 키 입력을 감지합니다. 목록에서 Mac Whisper를 켜주세요."
+                case .accessibility: return "다른 앱에 텍스트를 입력합니다. 목록에서 Mac Whisper를 켜주세요."
                 }
             case .simplifiedChinese:
                 switch self {
                 case .microphone: return "录制您的语音。"
                 case .speech: return "将语音转换为文本。"
-                case .inputMonitoring: return "检测 Fn 键。在设置中点按 + 并添加 Mac Whisper。"
-                case .accessibility: return "将文本插入其他应用。在设置中点按 + 并添加 Mac Whisper。"
+                case .inputMonitoring: return "检测 Fn 键。在列表中打开 Mac Whisper 的开关。"
+                case .accessibility: return "将文本插入其他应用。在列表中打开 Mac Whisper 的开关。"
                 }
             case .traditionalChinese:
                 switch self {
                 case .microphone: return "錄製您的語音。"
                 case .speech: return "將語音轉換為文字。"
-                case .inputMonitoring: return "偵測 Fn 鍵。在設定中按 + 並加入 Mac Whisper。"
-                case .accessibility: return "將文字插入其他應用程式。在設定中按 + 並加入 Mac Whisper。"
+                case .inputMonitoring: return "偵測 Fn 鍵。在列表中開啟 Mac Whisper。"
+                case .accessibility: return "將文字插入其他應用程式。在列表中開啟 Mac Whisper。"
                 }
             case .japanese:
                 switch self {
                 case .microphone: return "音声を録音します。"
                 case .speech: return "音声をテキストに変換します。"
-                case .inputMonitoring: return "Fn キーを検出します。設定で + をクリックし、Mac Whisper を追加してください。"
-                case .accessibility: return "他のアプリにテキストを入力します。設定で + をクリックし、Mac Whisper を追加してください。"
+                case .inputMonitoring: return "Fn キーを検出します。リストで Mac Whisper をオンにしてください。"
+                case .accessibility: return "他のアプリにテキストを入力します。リストで Mac Whisper をオンにしてください。"
                 }
             }
         }
@@ -100,22 +100,45 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
     private var statusLabels: [Int: NSTextField] = [:]
     private var detailLabels: [Int: NSTextField] = [:]
     private var headerLabel: NSTextField?
+    private var grantButtons: [Int: NSButton] = [:]
+
+    /// Tracks whether Input Monitoring was granted the last time we refreshed, so
+    /// we can detect the not-granted → granted transition and restart the Fn
+    /// monitor live (instead of forcing an app restart like Codex's "Quit &
+    /// Reopen"). Reset to nil until the first refresh so we never fire spuriously.
+    private var inputMonitoringWasGranted: Bool?
+
+    /// Called when Input Monitoring transitions from not-granted to granted while
+    /// the window is visible. AppDelegate wires this to live-restart the Fn
+    /// monitor so the Fn key starts working immediately.
+    var onInputMonitoringGranted: (() -> Void)?
 
     static var allGranted: Bool { Permission.allCases.allSatisfy { $0.isGranted } }
 
-    /// Two-line instruction shown at the top of the window, in the user's selected language.
-    private static func headerText(_ lang: RecognitionLanguage) -> String {
+    /// Header shown at the top of the window: a purpose line plus a reassurance
+    /// line, in the user's selected language. When everything is granted, a
+    /// short "all set" confirmation is shown instead.
+    private static func headerText(_ lang: RecognitionLanguage, allGranted: Bool) -> String {
+        if allGranted {
+            switch lang {
+            case .english: return "All set — Mac Whisper is ready to use."
+            case .korean: return "모두 준비되었습니다 — Mac Whisper를 사용할 수 있습니다."
+            case .simplifiedChinese: return "全部就绪 — Mac Whisper 已可使用。"
+            case .traditionalChinese: return "全部就緒 — Mac Whisper 已可使用。"
+            case .japanese: return "準備完了 — Mac Whisper をご利用いただけます。"
+            }
+        }
         switch lang {
         case .english:
-            return "Mac Whisper needs the following permissions.\nGrant each one, then return here and click Recheck."
+            return "Mac Whisper needs these to listen for the Fn key and insert your dictated text.\nThey're only used while you're dictating. Tap Allow on each, then toggle Mac Whisper on in System Settings."
         case .korean:
-            return "Mac Whisper을 사용하려면 다음 권한이 필요합니다.\n각 항목을 허용한 뒤 돌아와 Recheck를 클릭하세요."
+            return "Mac Whisper가 Fn 키를 감지하고 받아쓴 텍스트를 입력하려면 이 권한들이 필요합니다.\n받아쓰는 동안에만 사용됩니다. 각 항목에서 Allow를 누른 뒤 시스템 설정에서 Mac Whisper를 켜주세요."
         case .simplifiedChinese:
-            return "Mac Whisper 需要以下权限。\n请逐项授予权限，返回后点按 Recheck。"
+            return "Mac Whisper 需要这些权限来检测 Fn 键并插入听写文字。\n仅在听写时使用。逐项点按 Allow，然后在系统设置中打开 Mac Whisper。"
         case .traditionalChinese:
-            return "Mac Whisper 需要以下權限。\n請逐項授予權限，返回後按 Recheck。"
+            return "Mac Whisper 需要這些權限來偵測 Fn 鍵並插入聽寫文字。\n僅在聽寫時使用。逐項點按 Allow，然後在系統設定中開啟 Mac Whisper。"
         case .japanese:
-            return "Mac Whisper には次の権限が必要です。\n各項目を許可して戻ったら Recheck をクリックしてください。"
+            return "Mac Whisper が Fn キーを検出し、ディクテーション文字を入力するにはこれらの権限が必要です。\nディクテーション中のみ使用されます。各項目で Allow を押し、システム設定で Mac Whisper をオンにしてください。"
         }
     }
 
@@ -169,11 +192,12 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
             content.addSubview(status)
             statusLabels[permission.rawValue] = status
 
-            let button = NSButton(title: "Open Settings", target: self, action: #selector(grantTapped(_:)))
+            let button = NSButton(title: "Allow", target: self, action: #selector(grantTapped(_:)))
             button.bezelStyle = .rounded
             button.tag = permission.rawValue
             button.frame = NSRect(x: 490, y: y + 12, width: 130, height: 28)
             content.addSubview(button)
+            grantButtons[permission.rawValue] = button
 
             y -= 58
         }
@@ -194,18 +218,34 @@ final class PermissionsWindowController: NSWindowController, NSWindowDelegate {
 
     private func refresh() {
         let lang = Settings.shared.language
-        headerLabel?.stringValue = Self.headerText(lang)
+        let granted = Self.allGranted
+        headerLabel?.stringValue = Self.headerText(lang, allGranted: granted)
         for permission in Permission.allCases {
             detailLabels[permission.rawValue]?.stringValue = permission.detail(lang)
             guard let label = statusLabels[permission.rawValue] else { continue }
-            if permission.isGranted {
+            let isGranted = permission.isGranted
+            if isGranted {
                 label.stringValue = "✓ Granted"
                 label.textColor = .systemGreen
             } else {
                 label.stringValue = "Not granted"
                 label.textColor = .systemRed
             }
+            // Disable the Allow button once granted (Codex-style: enabled rows
+            // show their granted state and offer no further action).
+            grantButtons[permission.rawValue]?.isEnabled = !isGranted
         }
+
+        // Detect the Input Monitoring not-granted → granted transition so the Fn
+        // monitor can be restarted live (no app restart needed). Only fires after
+        // the first refresh establishes a baseline, so a window opened when the
+        // permission was already granted does not trigger a redundant restart.
+        let inputMonitoringGranted = Permission.inputMonitoring.isGranted
+        if let previous = inputMonitoringWasGranted,
+           !previous, inputMonitoringGranted {
+            onInputMonitoringGranted?()
+        }
+        inputMonitoringWasGranted = inputMonitoringGranted
     }
 
     @objc private func grantTapped(_ sender: NSButton) {
