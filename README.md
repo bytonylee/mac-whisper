@@ -1,20 +1,23 @@
 <p align="center">
-    <img src="./public/assets/readme/character.png" alt="Mac Whisper mascot" width="120">
+  <img src="./public/assets/readme/character.png" alt="Mac Whisper mascot" width="120">
 </p>
 
-<h1 align="center">
-  Mac Whisper
-</h1>
+<h1 align="center">Mac Whisper</h1>
 
 <p align="center">
-  <em>Hold <strong>Fn</strong> to talk. A macOS menu-bar app that turns your voice into text,
-  anywhere your cursor is — with optional LLM refinement.</em>
+  <em>Hold Fn, speak, and paste clean dictation into the app you are using.</em>
 </p>
 
 <p align="center">
-  <img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-111111?style=flat-square&logo=apple&logoColor=white">
-  <img alt="Swift" src="https://img.shields.io/badge/Swift-5.9-111111?style=flat-square&logo=swift&logoColor=white">
-  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111111?style=flat-square"></a>
+  <img src="https://img.shields.io/badge/tag-0.0.1-111111?style=flat-square" alt="Tag 0.0.1">
+  <img src="https://img.shields.io/badge/version-0.0.1-111111?style=flat-square" alt="Version 0.0.1">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/macOS-26%2B-111111?style=flat-square" alt="macOS 26+">
+  <img src="https://img.shields.io/badge/Swift-5.9-111111?style=flat-square" alt="Swift 5.9">
+</p>
+
+<p align="center">
+  <sub><a href="./README.md">English</a> &middot; <a href="./README.ko.md">한국어</a></sub>
 </p>
 
 <p align="center">
@@ -27,145 +30,175 @@
   <img src="./public/assets/readme/mac-whisper-demo.gif" alt="Mac Whisper push-to-talk dictation demo" width="100%">
 </p>
 
-## What it is
+Mac Whisper is a macOS menu bar app for push-to-talk dictation. Hold Fn, speak,
+release, and the transcript is pasted into the text field that already has
+focus.
 
-Mac Whisper is a push-to-talk dictation app that lives in your menu bar. Hold the **Fn / Globe** key, speak, and release — your words are typed into whatever field currently has focus. A floating Liquid Glass HUD shows the live transcript and a waveform while you talk. An optional LLM post-processing step cleans up obvious speech-recognition errors before the text is injected.
+It can also run a conservative LLM cleanup pass before pasting. The cleanup is
+optional, and the raw transcript is used if the LLM request fails.
 
-- **Push-to-talk via Fn/Globe** — read directly from the keyboard HID, no hotkey conflicts.
-- **Live floating HUD** — capsule-shaped, Liquid Glass on macOS 26, frosted HUD material below. Never steals focus.
-- **5 languages** — English, Korean, Simplified Chinese, Traditional Chinese, Japanese.
-- **On-device recognition** when supported (privacy + responsiveness).
-- **Optional LLM refinement** — OpenAI-compatible or Anthropic-compatible endpoints. Conservative, language-neutral post-editor.
-- **Smart audio routing** — forces the built-in mic so a Bluetooth headset stays in high-quality A2DP, and mutes system output while dictating.
-- **Silence auto-stop** — ends the session after sustained silence so you don't have to hold Fn forever.
+> Built for writing in any app without switching windows, opening a recorder, or
+> managing a separate transcript box.
 
-## Requirements
+**The app listens for the Fn key through HID, records with Speech framework,
+shows a floating HUD while you talk, and pastes through the clipboard with a
+simulated Cmd+V. It prefers the built-in microphone during dictation so
+Bluetooth headphones can stay in high quality playback mode.**
 
-- macOS 26 (Tahoe) or newer. `NSGlassEffectView` (Liquid Glass) only renders the real frosted material at a 26+ deployment target; older systems fall back to a flat translucent appearance.
-- Xcode Command Line Tools (`swift` / `swiftc`).
-- Permissions: **Microphone**, **Speech Recognition**, **Input Monitoring** (to read the Fn key), **Accessibility** (to inject text).
+## Why this exists
+
+macOS dictation works, but it is not tuned for quick push-to-talk writing across
+every app. Mac Whisper keeps the flow simple:
+
+- hold Fn to start
+- release Fn to stop
+- see the live transcript while speaking
+- paste into the focused text field
+- optionally clean up recognition mistakes with an LLM
+
+It is meant for short writing bursts: messages, notes, prompts, search boxes,
+issue comments, and anywhere else your cursor already is.
+
+## Status
+
+| Area | Behavior | Notes |
+|---|---|---|
+| Trigger | Hold Fn or Globe | Read from keyboard HID, not a global hotkey |
+| Speech | Live streaming recognition | Supports English, Korean, Chinese, and Japanese |
+| HUD | Floating transcript panel | Uses Liquid Glass on macOS 26 |
+| Audio | Built-in mic preference | Avoids forcing Bluetooth headsets into call mode |
+| Paste | Clipboard plus Cmd+V | Restores the previous clipboard after insertion |
+| LLM | Optional cleanup | Supports OpenAI-compatible and Anthropic-compatible endpoints |
+
+Menu controls:
+
+- `Language` changes the recognition locale.
+- `LLM Refinement` toggles cleanup and opens settings.
+- `Auto-stop on Silence` ends recording after a quiet pause.
+- `Permissions...` shows microphone, speech, input monitoring, and accessibility status.
 
 ## Install
 
-### From source (recommended for now)
+Download the latest `MacWhisper.dmg` from
+[Releases](https://github.com/bytonylee/mac-whisper/releases/latest), open it,
+and drag **Mac Whisper** into Applications.
+
+Or build the app locally:
 
 ```bash
-git clone <your-repo-url> mac-whisper
+git clone https://github.com/bytonylee/mac-whisper.git
 cd mac-whisper
-make app        # builds and codesigns MacWhisper.app
-open MacWhisper.app
+make app
+open "build/Mac Whisper.app"
 ```
 
-For persistent permissions across rebuilds, create a stable self-signed identity once:
+Requirements:
+
+- macOS 26+
+- Xcode command-line tools
+- Microphone permission
+- Speech Recognition permission
+- Input Monitoring permission
+- Accessibility permission
+
+For stable local permissions across rebuilds, create a self-signed signing
+identity once:
 
 ```bash
-make cert       # one-time; lets TCC permissions survive rebuilds
+make cert
 make app
 ```
 
-Without `make cert`, the app is ad-hoc signed and macOS resets Input Monitoring / Accessibility permissions on every rebuild.
+Without that identity, ad hoc signing can make macOS ask for Input Monitoring
+and Accessibility permissions again after each rebuild.
 
-### Install to /Applications
+## How It Works
 
-```bash
-make install
+The app creates a fresh speech session when Fn is pressed.
+
+```text
+Fn key down -> start audio engine -> stream recognition -> update HUD
+Fn key up   -> stop recognition -> optionally refine -> paste text
 ```
 
-## Build & run
-
-```bash
-make run        # builds, codesigns, and launches; sources .env if present
-make build      # swift build only
-make dmg        # create build/MacWhisper.dmg
-make clean      # remove .build and MacWhisper.app
-```
-
-## Usage
-
-1. Launch Mac Whisper. A microphone icon appears in the menu bar.
-2. Grant the four permissions from the **Permissions…** window (status updates automatically).
-3. Put your cursor in any text field.
-4. **Hold Fn**, speak, **release Fn**. The transcript is typed at the cursor.
-
-### Menu bar
-
-| Menu item | Action |
-| --- | --- |
-| **Language** | Switch recognition language (en / ko / zh-Hans / zh-Hant / ja). |
-| **LLM Refinement → Enable** | Toggle LLM post-processing. Opens Settings if not configured. |
-| **LLM Refinement → Settings…** | Configure provider, model, base URL, API key. |
-| **Auto-stop on Silence** | End the session after ~2.5 s of silence once you've spoken. |
-| **Permissions…** | Open the combined permissions window. |
-| **Quit** | ⌘Q |
-
-## LLM refinement configuration
-
-The API key is read from the environment, never stored in UserDefaults or entered in the UI.
+The API key for LLM refinement comes from the environment:
 
 ```bash
 cp .env.example .env
 # edit .env:
 #   MACWHISPER_LLM_API_KEY=sk-...
-make run        # sources .env so the app inherits the variable
+make run
 ```
 
-For an installed app (launched from Finder), set it once via `launchctl`:
+Installed apps launched from Finder can use:
 
 ```bash
 launchctl setenv MACWHISPER_LLM_API_KEY sk-...
 ```
 
-…or place the same line in `~/.config/macwhisper/.env`, which is read on every launch.
+You can also put the same line in `~/.config/macwhisper/.env`.
 
-Supported providers (curated, OpenAI- or Anthropic-compatible): OpenAI, Anthropic, Google Gemini, xAI Grok, DeepSeek, Xiaomi MiMo, Z.AI GLM, Kimi (Moonshot), MiniMax, Alibaba Qwen, plus a **Custom** option for any OpenAI-compatible endpoint. Custom base URLs must be `https://` (`http://` allowed only for `localhost` / `127.0.0.1`).
+## Build
 
-The refiner's system prompt is deliberately conservative: it only fixes obvious speech-recognition errors (homophones, mis-transcribed technical terms) and never paraphrases, translates, or rewrites. If the LLM call fails, the raw transcript is injected unchanged.
+Compile:
 
-## Permissions
-
-Mac Whisper needs four system permissions. The **Permissions…** window shows live status and an "Open Settings" button for each:
-
-| Permission | Used for |
-| --- | --- |
-| Microphone | Capturing your voice. |
-| Speech Recognition | Transcribing speech to text. |
-| Input Monitoring | Reading the Fn / Globe key via HID. |
-| Accessibility | Injecting text into other apps. |
-
-## Architecture
-
-```
-Sources/
-  main.swift              Entry point; menu-bar accessory app
-  AppDelegate.swift       Status item, menu, recording cycle
-  FnKeyMonitor.swift      HID-based Fn/Globe key monitor (AppleVendor top-case page)
-  SpeechService.swift     AVAudioEngine + SFSpeechRecognizer streaming recognition, VAD
-  SystemAudio.swift       Mute output + force built-in input while dictating
-  FloatingPanel.swift     Liquid Glass floating HUD (waveform + live transcript)
-  WaveformView.swift      5-bar audio-level waveform with attack/release envelope
-  TextInjector.swift      Clipboard + simulated ⌘V paste, CJK input-source handling
-  LLMRefiner.swift        OpenAI- / Anthropic-compatible chat-completions refinement
-  LLMProvider.swift       Curated provider + model registry
-  Settings.swift          UserDefaults wrapper + env-var API key
-  SettingsWindow.swift    LLM configuration UI
-  PermissionsWindow.swift Combined permissions window
+```bash
+make build
 ```
 
-Key design notes:
+Build and launch:
 
-- **Fresh `AVAudioEngine` per session**, released on teardown so the input HAL client closes and a Bluetooth headset can return to A2DP after dictation.
-- **Built-in mic forced** for capture so a Bluetooth headset isn't pushed into 16 kHz HFP.
-- **Mid-hold segment finalizations** are folded into an accumulated prefix and recognition is restarted, so push-to-talk survives pauses instead of ending the session.
-- **Thread safety**: shared recognizer state is guarded by a lock; the input-device switch runs off the main thread so the UI / Fn HID callback never blocks.
+```bash
+make run
+```
 
-## Diagnostics
+Create a DMG:
 
-A metadata-only log is written to `/tmp/macwhisper-diag.log` (session start/end, audio format, device transitions, peak levels). **No transcript text is logged.**
+```bash
+make dmg
+```
 
-## Known limitations
+## For agents
 
-- **Text injection via clipboard + simulated ⌘V.** The original clipboard contents are saved and restored, but the coordination relies on fixed timing and can race on very slow apps.
-- **Model lists are hardcoded** in `LLMProvider.swift` and will go stale as providers deprecate models.
+One-time setup to build and launch the app:
+
+```bash
+cd /path/to/mac-whisper
+make app
+open "build/Mac Whisper.app"
+```
+
+For a quick compile check, run:
+
+```bash
+swift build
+```
+
+## Security
+
+- The app needs microphone and speech recognition access to transcribe audio.
+- Input Monitoring is used only to read the Fn or Globe key.
+- Accessibility is used to paste text into the focused app.
+- Transcript text is not written to the diagnostic log.
+- The LLM API key is read from the environment, not from UserDefaults.
+- If LLM cleanup fails, the app pastes the raw transcript.
+
+## Tests
+
+```bash
+swift build
+```
+
+Manual checks still matter because macOS permissions, HID input, paste
+injection, and audio routing depend on system state.
+
+## Release
+
+Current tag: [`0.0.1`](https://github.com/bytonylee/mac-whisper/releases/tag/0.0.1)
+
+The `0.0.1` release includes push-to-talk dictation, the floating transcript
+HUD, language selection, optional LLM cleanup, local build scripts, and DMG
+packaging.
 
 ## License
 
