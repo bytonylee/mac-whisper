@@ -1,9 +1,9 @@
 <p align="center">
-    <img src="./public/assets/readme/character.png" alt="Mac Whisper mascot" width="120" align="top">
+    <img src="./public/assets/readme/character.png" alt="Mac Whisper mascot" width="120">
 </p>
 
 <h1 align="center">
-  &nbsp;Mac Whisper
+  Mac Whisper
 </h1>
 
 <p align="center">
