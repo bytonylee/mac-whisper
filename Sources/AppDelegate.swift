@@ -142,6 +142,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fnMonitor.onFnDown = { [weak self] in self?.startRecording() }
         fnMonitor.onFnUp = { [weak self] in self?.stopRecording() }
 
+        // Live-restart the Fn monitor the moment Input Monitoring is granted
+        // while the permissions window is open, so the Fn key starts working
+        // without an app restart (the Codex "Quit & Reopen" step avoided).
+        permissionsController.onInputMonitoringGranted = { [weak self] in
+            self?.fnMonitor.stop()
+            _ = self?.fnMonitor.start()
+        }
+
         // Show the single combined permissions window only when something is missing.
         if !PermissionsWindowController.allGranted {
             permissionsController.showWindow()
@@ -160,7 +168,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startRecording() {
         NSLog("MacWhisper[App]: startRecording isRecording=\(isRecording) isFinishing=\(isFinishing)")
-        guard !isRecording, !isFinishing else { return }
+        // A rapid Fn press during the previous session's flush window (between
+        // stop() and the recognizer's onFinished) used to be rejected by the
+        // isFinishing guard, dropping the press — and the stale session's
+        // deferred panel.hide() then dismissed the HUD mid-sequence. Supersede
+        // the finishing session instead: hard-cancel it (no transcript injected
+        // for the aborted session) and start fresh. speech.cancel() invalidates
+        // every stale async finish() via the generation token, so the late
+        // onFinished from the old session can't tear down the new one.
+        if isFinishing {
+            NSLog("MacWhisper[App]: superseding finishing session")
+            speech.cancel()
+            isFinishing = false
+        }
+        guard !isRecording else { return }
         isRecording = true
         SystemAudio.muteOutput()
         speech.reset()

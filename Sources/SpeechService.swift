@@ -45,6 +45,15 @@ final class SpeechService {
     /// the final result. Distinguishes a real session end from the recognizer's
     /// own mid-hold segment finalizations.
     private var isStopping = false
+    /// Session generation. Bumped on every start()/cancel() so that every async
+    /// path which can fire finish() (the stop() fallback timer and the recognizer
+    /// callback) can detect that it belongs to a superseded session and no-op.
+    /// Without this, a rapid Fn press during a previous session's flush window
+    /// would let the stale session's late finish() tear down the new session.
+    private var gen = 0
+    /// Cancellable wrapper around the stop() fallback timer so cancel() can kill
+    /// it; DispatchQueue.main.asyncAfter returns nothing we can cancel.
+    private var stopFallback: DispatchWorkItem?
 
     /// Serializes access to the fields touched from both the audio tap thread and
     /// the recognition callback thread (vs. main-thread methods). Without this,
@@ -63,6 +72,12 @@ final class SpeechService {
     /// Loudest level seen this session, written to the diagnostics log so the
     /// voice threshold can be calibrated against real mic input.
     private var sessionPeakLevel: Float = 0
+
+    /// Verbose per-tap / per-callback logging. Off by default — these fire on
+    /// the audio tap thread (~86 Hz) and the recognition callback thread, where
+    /// NSLog + synchronous diag-file I/O waste real CPU during long recordings.
+    /// Flip to true only when calibrating the VAD threshold or debugging.
+    private static let debugLogging = false
 
     /// Full transcript so far: finalized segments plus the in-progress one.
     private var combinedTranscript: String {
@@ -83,6 +98,12 @@ final class SpeechService {
 
     func start(language: RecognitionLanguage) {
         guard !isRunning, !isStarting else { return }
+        // New session generation: any in-flight finish()/fallback from a prior
+        // session becomes a no-op. Also drop a pending fallback timer from a
+        // previous stop() that never flushed.
+        gen &+= 1
+        stopFallback?.cancel()
+        stopFallback = nil
         isStarting = true
         latestTranscript = ""
         finalizedPrefix = ""
@@ -151,7 +172,7 @@ final class SpeechService {
             let level = self.level(from: buffer)
             if level > self.sessionPeakLevel { self.sessionPeakLevel = level }
             let voiceActive = level >= self.silenceThreshold
-            if tapBufferCount <= 3 || (tapBufferCount % 100 == 0) {
+            if Self.debugLogging && (tapBufferCount <= 3 || tapBufferCount % 100 == 0) {
                 NSLog("MacWhisper[Speech][DEBUG]: tap #\(tapBufferCount) level=\(level) peak=\(self.sessionPeakLevel) voice=\(voiceActive)")
             }
 
@@ -164,7 +185,7 @@ final class SpeechService {
             self.stateLock.lock()
             let req = self.request
             self.stateLock.unlock()
-            if req == nil && tapBufferCount <= 10 {
+            if Self.debugLogging, req == nil, tapBufferCount <= 10 {
                 NSLog("MacWhisper[Speech][DEBUG]: tap #\(tapBufferCount) request is NIL — buffer dropped!")
             }
             req?.append(buffer)
@@ -213,10 +234,15 @@ final class SpeechService {
         self.request = request
         NSLog("MacWhisper[Speech][DEBUG]: startRecognitionTask #\(recognitionTaskCount) onDevice=\(request.requiresOnDeviceRecognition)")
 
+        // Capture the generation this task belongs to so a late callback from a
+        // superseded session can't fire finish() on the current one.
+        let taskGen = gen
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
             if let result {
-                NSLog("MacWhisper[Speech][DEBUG]: callback result isFinal=\(result.isFinal) text='\(result.bestTranscription.formattedString)'")
+                if Self.debugLogging {
+                    NSLog("MacWhisper[Speech][DEBUG]: callback result isFinal=\(result.isFinal) text='\(result.bestTranscription.formattedString)'")
+                }
                 self.stateLock.lock()
                 self.latestTranscript = result.bestTranscription.formattedString
                 let combined = self.combinedTranscript
@@ -236,7 +262,7 @@ final class SpeechService {
             if stopping {
                 // Flushing after Fn-release / VAD — this is the true session end.
                 NSLog("MacWhisper[Speech][DEBUG]: segment ended, stopping -> finish()")
-                self.finish()
+                self.finish(expectedGen: taskGen)
             } else {
                 // The recognizer finalized a segment on its own (it does this after
                 // a pause / on ambient noise). Push-to-talk must keep going until the
@@ -246,8 +272,15 @@ final class SpeechService {
                 DispatchQueue.main.async {
                     guard self.isRunning, !self.isStopping else { return }
                     self.foldFinalizedSegment()
+                    // Cancel/end the finalized segment's task+request before
+                    // starting a fresh one. The segment is "final" but the
+                    // underlying Speech framework objects can still hold internal
+                    // buffers until explicitly ended; over a long hold with many
+                    // pause-driven finalizations this previously leaked memory.
                     self.stateLock.lock()
+                    self.task?.cancel()
                     self.task = nil
+                    self.request?.endAudio()
                     self.request = nil
                     self.stateLock.unlock()
                     self.startRecognitionTask()
@@ -299,7 +332,7 @@ final class SpeechService {
         // deliver a final result exactly once so the HUD always dismisses.
         guard isRunning, !isStopping else {
             NSLog("MacWhisper[Speech][DEBUG]: stop() -> early finish (not running)")
-            finish()
+            finish(expectedGen: gen)
             return
         }
         isStopping = true
@@ -310,16 +343,47 @@ final class SpeechService {
         onLevel?(0)
         NSLog("MacWhisper[Speech][DEBUG]: stop() -> endAudio sent, waiting for final callback")
         // The recognition callback will fire finish(); guarantee it with a fallback.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+        // Stored as a cancellable work item so cancel() can kill it when a new Fn
+        // press supersedes this session mid-flush.
+        let stopGen = gen
+        let fallback = DispatchWorkItem { [weak self] in
             NSLog("MacWhisper[Speech][DEBUG]: stop() fallback timer firing finish()")
-            self?.finish()
+            self?.finish(expectedGen: stopGen)
         }
+        stopFallback = fallback
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: fallback)
+    }
+
+    /// Hard-abort the current session without delivering a transcript. Used when a
+    /// new Fn press supersedes a session that is still flushing its final result
+    /// (the window between stop() and the recognizer's onFinished). Bumps the
+    /// generation so every stale async finish() — the fallback timer and any late
+    /// recognizer callback — becomes a no-op, then tears down audio/resources.
+    func cancel() {
+        NSLog("MacWhisper[Speech][DEBUG]: cancel() called isRunning=\(isRunning) isStopping=\(isStopping) isStarting=\(isStarting) didFinish=\(didFinish)")
+        gen &+= 1
+        stopFallback?.cancel()
+        stopFallback = nil
+        silenceTimer?.invalidate()
+        silenceTimer = nil
+        isRunning = false
+        isStarting = false
+        isStopping = false
+        // Belt-and-suspenders: any in-flight finish() that already passed its
+        // generation check before we bumped gen is stopped by didFinish.
+        didFinish = true
+        cleanup()
+        onLevel?(0)
     }
 
     private var didFinish = false
-    private func finish() {
-        guard !didFinish else { return }
+    private func finish(expectedGen: Int) {
+        // Ignore finishes from a superseded session (stale fallback timer or late
+        // recognizer callback) and the guaranteed single-delivery guard.
+        guard !didFinish, expectedGen == gen else { return }
         didFinish = true
+        stopFallback?.cancel()
+        stopFallback = nil
         isRunning = false
         isStopping = false
         silenceTimer?.invalidate()
