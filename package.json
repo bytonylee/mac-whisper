@@ -1,0 +1,16 @@
+{
+  "name": "mac-whisper",
+  "version": "0.0.1",
+  "description": "Hold Fn to talk. A macOS menu-bar app that turns your voice into text, anywhere your cursor is — with optional LLM refinement.",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build": "make build",
+    "app": "make app",
+    "dmg": "make dmg",
+    "run": "make run",
+    "install-app": "make install",
+    "cert": "make cert",
+    "clean": "make clean"
+  }
+}
