@@ -1,0 +1,38 @@
+# Build output
+build/
+.build/
+
+# Local environment file — holds the LLM API key (MACWHISPER_LLM_API_KEY).
+# Never commit this. See .env.example for the format.
+.env
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/
+.codex/
+*.swp
+*.swo
+*.iml
+
+# Stale demo gif duplicate — the README uses public/assets/readme/mac-whisper-demo.gif
+/mac-whisper-demo.gif
+
+# Coverage / cache
+coverage/
+.cache/
+__pycache__/
+*.py[cod]
+
+# Codex imagegen workspace
+tmp/
+
+# Bun / Node
+node_modules/
+bun.lock
+bun.lockb
