@@ -64,6 +64,12 @@ final class SpeechService {
     /// voice threshold can be calibrated against real mic input.
     private var sessionPeakLevel: Float = 0
 
+    /// Verbose per-tap / per-callback logging. Off by default — these fire on
+    /// the audio tap thread (~86 Hz) and the recognition callback thread, where
+    /// NSLog + synchronous diag-file I/O waste real CPU during long recordings.
+    /// Flip to true only when calibrating the VAD threshold or debugging.
+    private static let debugLogging = false
+
     /// Full transcript so far: finalized segments plus the in-progress one.
     private var combinedTranscript: String {
         if finalizedPrefix.isEmpty { return latestTranscript }
@@ -151,7 +157,7 @@ final class SpeechService {
             let level = self.level(from: buffer)
             if level > self.sessionPeakLevel { self.sessionPeakLevel = level }
             let voiceActive = level >= self.silenceThreshold
-            if tapBufferCount <= 3 || (tapBufferCount % 100 == 0) {
+            if Self.debugLogging && (tapBufferCount <= 3 || tapBufferCount % 100 == 0) {
                 NSLog("MacWhisper[Speech][DEBUG]: tap #\(tapBufferCount) level=\(level) peak=\(self.sessionPeakLevel) voice=\(voiceActive)")
             }
 
@@ -164,7 +170,7 @@ final class SpeechService {
             self.stateLock.lock()
             let req = self.request
             self.stateLock.unlock()
-            if req == nil && tapBufferCount <= 10 {
+            if Self.debugLogging, req == nil, tapBufferCount <= 10 {
                 NSLog("MacWhisper[Speech][DEBUG]: tap #\(tapBufferCount) request is NIL — buffer dropped!")
             }
             req?.append(buffer)
@@ -216,7 +222,9 @@ final class SpeechService {
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
             if let result {
-                NSLog("MacWhisper[Speech][DEBUG]: callback result isFinal=\(result.isFinal) text='\(result.bestTranscription.formattedString)'")
+                if Self.debugLogging {
+                    NSLog("MacWhisper[Speech][DEBUG]: callback result isFinal=\(result.isFinal) text='\(result.bestTranscription.formattedString)'")
+                }
                 self.stateLock.lock()
                 self.latestTranscript = result.bestTranscription.formattedString
                 let combined = self.combinedTranscript
@@ -246,8 +254,15 @@ final class SpeechService {
                 DispatchQueue.main.async {
                     guard self.isRunning, !self.isStopping else { return }
                     self.foldFinalizedSegment()
+                    // Cancel/end the finalized segment's task+request before
+                    // starting a fresh one. The segment is "final" but the
+                    // underlying Speech framework objects can still hold internal
+                    // buffers until explicitly ended; over a long hold with many
+                    // pause-driven finalizations this previously leaked memory.
                     self.stateLock.lock()
+                    self.task?.cancel()
                     self.task = nil
+                    self.request?.endAudio()
                     self.request = nil
                     self.stateLock.unlock()
                     self.startRecognitionTask()
