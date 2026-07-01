@@ -2,20 +2,22 @@
   <img src="./public/assets/readme/hero.png" alt="Mac Whisper 히어로" width="720">
 </p>
 
-<h1 align="center">
-  <img src="./public/assets/readme/character.png" alt="Mac Whisper 마스코트" width="120" align="top">
-  &nbsp;Mac Whisper
-</h1>
+<h1 align="center">Mac Whisper</h1>
 
 <p align="center">
-  <strong>Fn</strong> 키를 누른 채 말하세요. 커서가 있는 어디든 음성을 텍스트로 바꿔주는
-  macOS 메뉴 막대 앱 — 선택적 LLM 다듬기 포함.
+  <em>Fn을 누른 채 말하면, 지금 쓰는 앱에 받아쓴 문장이 붙여넣어집니다.</em>
 </p>
 
 <p align="center">
-  <img alt="macOS 26+" src="https://img.shields.io/badge/macOS-26%2B-111111?style=flat-square&logo=apple&logoColor=white">
-  <img alt="Swift" src="https://img.shields.io/badge/Swift-5.9-111111?style=flat-square&logo=swift&logoColor=white">
-  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111111?style=flat-square"></a>
+  <img src="https://img.shields.io/badge/tag-0.0.1-111111?style=flat-square" alt="Tag 0.0.1">
+  <img src="https://img.shields.io/badge/version-0.0.1-111111?style=flat-square" alt="Version 0.0.1">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/macOS-26%2B-111111?style=flat-square" alt="macOS 26+">
+  <img src="https://img.shields.io/badge/Swift-5.9-111111?style=flat-square" alt="Swift 5.9">
+</p>
+
+<p align="center">
+  <sub><a href="./README.md">English</a> &middot; <a href="./README.ko.md">한국어</a></sub>
 </p>
 
 <p align="center">
@@ -25,148 +27,174 @@
 ---
 
 <p align="center">
-  <img src="./public/assets/readme/mac-whisper-demo.gif" alt="Mac Whisper 푸시-투-톡 받아쓰기 데모" width="100%">
+  <img src="./public/assets/readme/mac-whisper-demo.gif" alt="Mac Whisper 푸시 투 톡 받아쓰기 데모" width="100%">
 </p>
 
-## 소개
+Mac Whisper은 푸시 투 톡 받아쓰기를 위한 macOS 메뉴 막대 앱입니다. Fn을
+누른 채 말하고 손을 떼면, 포커스가 있는 입력란에 전사문이 붙여넣어집니다.
 
-Mac Whisper은 메뉴 막대에 상주하는 푸시-투-톡 받아쓰기 앱입니다. **Fn / 🌐 키**를 누른 채 말하고 떼면, 현재 포커스된 입력란에 그대로 입력됩니다. 말하는 동안 Liquid Glass 플로팅 HUD가 실시간 전사와 파형을 보여줍니다. 선택적 LLM 후처리 단계가 주요 음성 인식 오류를 정리한 뒤 텍스트를 주입합니다.
+붙여넣기 전에 보수적인 LLM 정리 단계를 거칠 수도 있습니다. 이 기능은
+선택 사항이며, LLM 요청이 실패하면 원본 전사문을 그대로 사용합니다.
 
-- **Fn/🌐 키 푸시-투-톡** — 키보드 HID에서 직접 읽으므로 단축키 충돌이 없습니다.
-- **실시간 플로팅 HUD** — 캡슐 형태, macOS 26에서 Liquid Glass, 그 이하에서는 프로스티드 HUD 재질. 포커스를 빼앗지 않습니다.
-- **5개 언어** — 영어, 한국어, 간체 중국어, 번체 중국어, 일본어.
-- **온디바이스 인식** 지원 시 (개인정보 보호 + 반응성).
-- **선택적 LLM 다듬기** — OpenAI 호환 또는 Anthropic 호환 엔드포인트. 보수적이고 언어 중립적인 후편집.
-- **스마트 오디오 라우팅** — 내장 마이크를 강제 사용해 블루투스 헤드셋이 고품질 A2DP를 유지하도록 하고, 받아쓰는 동안 시스템 출력을 음소거합니다.
-- **침묵 자동 종료** — 일정 시간 침묵이 지속되면 세션을 종료해 Fn을 오래 누르지 않아도 됩니다.
+> 창을 바꾸거나 녹음기를 열지 않고, 지금 쓰는 앱에서 바로 글을 넣기 위해
+> 만들었습니다.
 
-## 요구 사항
+**앱은 HID로 Fn 키를 읽고, Speech framework로 음성을 인식하고, 말하는 동안
+플로팅 HUD를 보여줍니다. 붙여넣기는 클립보드와 Cmd+V 시뮬레이션으로 처리합니다.
+받아쓰는 동안에는 내장 마이크를 우선 사용해 Bluetooth 헤드폰이 고품질 재생
+모드를 유지하도록 합니다.**
 
-- macOS 26(Tahoe) 이상. `NSGlassEffectView`(Liquid Glass)는 배포 타깃이 26 이상일 때만 실제 프로스티드 재질을 렌더링합니다. 그 이하에서는 평평한 반투명 외관으로 폴백됩니다.
-- Xcode Command Line Tools(`swift` / `swiftc`).
-- 권한: **마이크**, **음성 인식**, **입력 모니터링**(Fn 키 읽기), **접근성**(텍스트 주입).
+## 왜 만들었나
+
+macOS 받아쓰기는 쓸 만하지만, 모든 앱에서 짧게 눌러 말하고 바로 붙여넣는
+흐름에는 맞지 않습니다. Mac Whisper의 흐름은 단순합니다.
+
+- Fn을 누르면 시작
+- Fn에서 손을 떼면 종료
+- 말하는 동안 실시간 전사 확인
+- 포커스된 입력란에 붙여넣기
+- 필요하면 LLM으로 인식 오류 정리
+
+메시지, 메모, 프롬프트, 검색창, 이슈 댓글처럼 커서가 이미 놓인 곳에 짧게
+글을 넣는 용도에 맞췄습니다.
+
+## 상태
+
+| 영역 | 동작 | 메모 |
+|---|---|---|
+| 트리거 | Fn 또는 Globe 길게 누르기 | 전역 단축키가 아니라 키보드 HID에서 읽음 |
+| 음성 | 실시간 스트리밍 인식 | 영어, 한국어, 중국어, 일본어 지원 |
+| HUD | 플로팅 전사 패널 | macOS 26에서 Liquid Glass 사용 |
+| 오디오 | 내장 마이크 우선 | Bluetooth 헤드셋이 통화 모드로 바뀌는 상황을 줄임 |
+| 붙여넣기 | 클립보드와 Cmd+V | 입력 뒤 이전 클립보드를 복원 |
+| LLM | 선택적 정리 | OpenAI 호환, Anthropic 호환 엔드포인트 지원 |
+
+메뉴에서 할 수 있는 일:
+
+- `Language`로 인식 언어를 바꿉니다.
+- `LLM Refinement`로 정리 기능을 켜고 설정을 엽니다.
+- `Auto-stop on Silence`로 조용한 구간 뒤 녹음을 끝냅니다.
+- `Permissions...`에서 마이크, 음성 인식, 입력 모니터링, 접근성 상태를 봅니다.
 
 ## 설치
 
-### 소스에서 (현재 권장)
+[Releases](https://github.com/bytonylee/mac-whisper/releases/latest)에서 최신
+`MacWhisper.dmg`를 내려받아 열고, **Mac Whisper**를 Applications로 옮기세요.
+
+로컬에서 빌드할 수도 있습니다.
 
 ```bash
-git clone <your-repo-url> mac-whisper
+git clone https://github.com/bytonylee/mac-whisper.git
 cd mac-whisper
-make app        # MacWhisper.app 빌드 및 코드사인
-open MacWhisper.app
+make app
+open "build/Mac Whisper.app"
 ```
 
-리빌드 간 권한을 유지하려면 안정적인 자체 서명 인증서를 한 번 만드세요:
+요구 사항:
+
+- macOS 26+
+- Xcode command-line tools
+- 마이크 권한
+- 음성 인식 권한
+- 입력 모니터링 권한
+- 접근성 권한
+
+로컬 리빌드 후에도 권한을 유지하려면 자체 서명 인증서를 한 번 만드세요.
 
 ```bash
-make cert       # 최초 1회; 이후 TCC 권한이 리빌드 후에도 유지됩니다
+make cert
 make app
 ```
 
-`make cert` 없이는 앱이 임시 서명되어 매 리빌드마다 입력 모니터링 / 접근성 권한이 초기화됩니다.
+이 인증서가 없으면 임시 서명 때문에 macOS가 리빌드할 때마다 입력 모니터링과
+접근성 권한을 다시 요구할 수 있습니다.
 
-### /Applications에 설치
+## 작동 방식
 
-```bash
-make install
+Fn을 누르면 앱이 새 음성 세션을 만듭니다.
+
+```text
+Fn key down -> start audio engine -> stream recognition -> update HUD
+Fn key up   -> stop recognition -> optionally refine -> paste text
 ```
 
-## 빌드 및 실행
-
-```bash
-make run        # 빌드, 코드사인, 실행; .env가 있으면 불러옵니다
-make build      # swift build만
-make dmg        # build/MacWhisper.dmg 생성
-make clean      # .build와 MacWhisper.app 제거
-```
-
-## 사용 방법
-
-1. Mac Whisper을 실행하세요. 메뉴 막대에 마이크 아이콘이 나타납니다.
-2. **Permissions…** 창에서 네 가지 권한을 허용하세요 (상태가 자동으로 갱신됩니다).
-3. 아무 텍스트 입력란에 커서를 두세요.
-4. **Fn을 누른 채** 말하고, **Fn을 떼세요**. 전사된 텍스트가 커서 위치에 입력됩니다.
-
-### 메뉴 막대
-
-| 메뉴 항목 | 동작 |
-| --- | --- |
-| **Language** | 인식 언어 전환 (en / ko / zh-Hans / zh-Hant / ja). |
-| **LLM Refinement → Enable** | LLM 후처리 토글. 미설정 시 설정 창을 엽니다. |
-| **LLM Refinement → Settings…** | 프로바이더, 모델, 베이스 URL, API 키 설정. |
-| **Auto-stop on Silence** | 말한 뒤 ~2.5초 침묵 시 세션 종료. |
-| **Permissions…** | 통합 권한 창 열기. |
-| **Quit** | ⌘Q |
-
-## LLM 다듬기 설정
-
-API 키는 환경에서 읽으며, UserDefaults에 저장되거나 UI에 입력되지 않습니다.
+LLM 정리에 쓰는 API 키는 환경 변수에서 읽습니다.
 
 ```bash
 cp .env.example .env
 # .env 편집:
 #   MACWHISPER_LLM_API_KEY=sk-...
-make run        # .env를 불러와 앱이 변수를 상속받습니다
+make run
 ```
 
-설치된 앱(Finder에서 실행)의 경우 `launchctl`로 한 번 설정하세요:
+Finder에서 실행하는 설치 앱은 아래 명령을 사용할 수 있습니다.
 
 ```bash
 launchctl setenv MACWHISPER_LLM_API_KEY sk-...
 ```
 
-…또는 같은 줄을 `~/.config/macwhisper/.env`에 넣으면 매 실행 시 읽습니다.
+같은 내용을 `~/.config/macwhisper/.env`에 넣어도 됩니다.
 
-지원 프로바이더(큐레이션됨, OpenAI 또는 Anthropic 호환): OpenAI, Anthropic, Google Gemini, xAI Grok, DeepSeek, Xiaomi MiMo, Z.AI GLM, Kimi(Moonshot), MiniMax, Alibaba Qwen, 그리고 임의의 OpenAI 호환 엔드포인트용 **Custom** 옵션. 커스텀 베이스 URL은 `https://`여야 합니다(`http://`는 `localhost` / `127.0.0.1`만 허용).
+## 빌드
 
-다듬기 시스템 프롬프트는 의도적으로 보수적입니다: 명백한 음성 인식 오류(동음이의어, 잘못 전사된 기술 용어)만 고치며, 바꿔 쓰거나 번역하거나 재작성하지 않습니다. LLM 호출이 실패하면 원본 전사가 그대로 주입됩니다.
+컴파일:
 
-## 권한
-
-Mac Whisper은 네 가지 시스템 권한이 필요합니다. **Permissions…** 창이 실시간 상태와 각 항목의 "Open Settings" 버튼을 보여줍니다:
-
-| 권한 | 용도 |
-| --- | --- |
-| 마이크 | 음성 캡처. |
-| 음성 인식 | 음성을 텍스트로 전사. |
-| 입력 모니터링 | HID로 Fn / 🌐 키 읽기. |
-| 접근성 | 다른 앱에 텍스트 주입. |
-
-## 아키텍처
-
-```
-Sources/
-  main.swift              진입점; 메뉴 막대 액세서리 앱
-  AppDelegate.swift       상태 항목, 메뉴, 녹음 사이클
-  FnKeyMonitor.swift      HID 기반 Fn/🌐 키 모니터 (AppleVendor top-case 페이지)
-  SpeechService.swift     AVAudioEngine + SFSpeechRecognizer 스트리밍 인식, VAD
-  SystemAudio.swift       받아쓰는 동안 출력 음소거 + 내장 입력 강제
-  FloatingPanel.swift     Liquid Glass 플로팅 HUD (파형 + 실시간 전사)
-  WaveformView.swift      어택/릴리즈 엔벨로프를 가진 5-바 오디오 레벨 파형
-  TextInjector.swift      클립보드 + 시뮬레이션 ⌘V 붙여넣기, CJK 입력 소스 처리
-  LLMRefiner.swift        OpenAI / Anthropic 호환 chat-completions 다듬기
-  LLMProvider.swift       큐레이션된 프로바이더 + 모델 레지스트리
-  Settings.swift          UserDefaults 래퍼 + 환경변수 API 키
-  SettingsWindow.swift    LLM 설정 UI
-  PermissionsWindow.swift 통합 권한 창
+```bash
+make build
 ```
 
-주요 설계 메모:
+빌드 후 실행:
 
-- **세션마다 새 `AVAudioEngine`**, 티어다운 시 해제해 입력 HAL 클라이언트가 닫히고 블루투스 헤드셋이 받아쓰기 후 A2DP로 돌아갈 수 있습니다.
-- **내장 마이크 강제** 캡처 — 블루투스 헤드셋이 16 kHz HFP로 밀리지 않습니다.
-- **홀드 중 세그먼트 종료**는 누적 프리픽스로 접히고 인식이 재시작되어, 푸시-투-톡이 멈춤에서 살아남고 세션이 끝나지 않습니다.
-- **스레드 안전**: 공유 인식기 상태는 락으로 보호되고, 입력 장치 전환은 메인 스레드 밖에서 실행되어 UI / Fn HID 콜백이 블록되지 않습니다.
+```bash
+make run
+```
 
-## 진단
+DMG 생성:
 
-메타데이터 전용 로그가 `/tmp/macwhisper-diag.log`에 기록됩니다 (세션 시작/종료, 오디오 포맷, 장치 전환, 피크 레벨). **전사 텍스트는 기록되지 않습니다.**
+```bash
+make dmg
+```
 
-## 알려진 제한
+## 에이전트용
 
-- **클립보드 + 시뮬레이션 ⌘V를 통한 텍스트 주입.** 원본 클립보드 내용은 저장 후 복원되지만, 고정 타이밍에 의존해 매우 느린 앱에서는 경쟁이 발생할 수 있습니다.
-- **모델 목록은 하드코딩**되어 `LLMProvider.swift`에 있으며, 프로바이더가 모델을 단종하면 오래될 수 있습니다.
+한 번 빌드하고 실행하려면:
+
+```bash
+cd /path/to/mac-whisper
+make app
+open "build/Mac Whisper.app"
+```
+
+빠른 컴파일 확인:
+
+```bash
+swift build
+```
+
+## 보안
+
+- 앱은 음성을 전사하려고 마이크와 음성 인식 권한을 요청합니다.
+- 입력 모니터링은 Fn 또는 Globe 키를 읽는 데만 씁니다.
+- 접근성 권한은 포커스된 앱에 텍스트를 붙여넣는 데 씁니다.
+- 진단 로그에는 전사문을 쓰지 않습니다.
+- LLM API 키는 UserDefaults가 아니라 환경 변수에서 읽습니다.
+- LLM 정리가 실패하면 원본 전사문을 붙여넣습니다.
+
+## 테스트
+
+```bash
+swift build
+```
+
+macOS 권한, HID 입력, 붙여넣기, 오디오 라우팅은 시스템 상태의 영향을 받으므로
+수동 확인도 필요합니다.
+
+## 릴리스
+
+현재 태그: [`0.0.1`](https://github.com/bytonylee/mac-whisper/releases/tag/0.0.1)
+
+`0.0.1` 릴리스에는 푸시 투 톡 받아쓰기, 플로팅 전사 HUD, 언어 선택, 선택적
+LLM 정리, 로컬 빌드 스크립트, DMG 패키징이 포함되어 있습니다.
 
 ## 라이선스
 
