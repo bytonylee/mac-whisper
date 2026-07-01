@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Mac Whisper</string>
+    <key>CFBundleDisplayName</key>
+    <string>Mac Whisper</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.solo.macwhisper</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>MacWhisper</string>
+    <key>CFBundleIconFile</key>
+    <string>MacWhisper</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>26.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Mac Whisper needs microphone access to transcribe your speech.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Mac Whisper uses speech recognition to convert your speech to text.</string>
+</dict>
+</plist>
