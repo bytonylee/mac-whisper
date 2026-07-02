@@ -1,5 +1,7 @@
-# Build output
-build/
+# Build output — ignore everything under build/ except the release DMG,
+# which is tracked so it can be shared/downloaded directly from the repo.
+/build/*
+!/build/MacWhisper.dmg
 .build/
 
 # Local environment file — holds the LLM API key (MACWHISPER_LLM_API_KEY).
