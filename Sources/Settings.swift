@@ -177,13 +177,13 @@ final class Settings {
     }
 
     /// Custom trigger key (HID page/usage) for external keyboards. Defaults to
-    /// Right Ctrl on the standard keyboard page. The Apple Fn key (⌃Fn) always
-    /// works in addition.
+    /// Left Ctrl on the standard keyboard page: hold it to dictate, add Shift
+    /// for the long-form toggle. The Apple Fn key (⌃Fn) always works too.
     var triggerKey: (page: UInt32, usage: UInt32) {
         get {
             let page = defaults.integer(forKey: Keys.triggerKeyPage)
             let usage = defaults.integer(forKey: Keys.triggerKeyUsage)
-            guard page > 0, usage > 0 else { return (0x07, 0xE4) }
+            guard page > 0, usage > 0 else { return (0x07, 0xE0) }
             return (UInt32(page), UInt32(usage))
         }
         set {

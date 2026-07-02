@@ -89,8 +89,7 @@ final class KeySettingsWindowController: NSWindowController, NSWindowDelegate {
         Dictation key: hold to dictate; add Shift to start/stop a long-form \
         recording. Long-form key: optional dedicated key — one press toggles \
         the long-form recording by itself. The Apple keyboard's ⌃Fn / ⌃⇧Fn \
-        always works too. Pick keys you don't use elsewhere (Right Ctrl, \
-        Right Option, F13–F19 work well).
+        always works too. Defaults: hold Left Ctrl to dictate, Left Ctrl+Shift for long-form.
         """
         content.addSubview(hintLabel)
 
@@ -146,7 +145,7 @@ final class KeySettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func resetTapped() {
-        Settings.shared.triggerKey = (0x07, 0xE4)
+        Settings.shared.triggerKey = (0x07, 0xE0)
         Settings.shared.longTriggerKey = nil
         onTriggerChanged?()
         refresh()
