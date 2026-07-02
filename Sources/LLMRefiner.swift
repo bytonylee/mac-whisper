@@ -44,6 +44,40 @@ enum LLMRefiner {
         var errorDescription: String? { message }
     }
 
+    /// System prompt for turning a raw meeting transcript into structured
+    /// minutes. The glossary is appended so domain terms come out right.
+    private static var meetingNotesPrompt: String {
+        var prompt = """
+        You are a professional minute-taker. Turn the raw speech-to-text transcript of a \
+        meeting into clear, structured meeting notes, written in the SAME language as the \
+        transcript (do not translate).
+
+        Rules:
+        1. The transcript comes from speech recognition and contains mis-recognized words; \
+        silently correct them from context. Never invent content that was not said.
+        2. Output Markdown with these sections (localize the headings to the transcript's \
+        language): a one-line title; Summary (2-4 sentences); Key discussion points \
+        (bullets); Decisions (bullets, or "none"); Action items (bullets with owner when \
+        one was mentioned).
+        3. Be faithful and concise — notes, not a re-telling.
+        4. Output only the notes, no preamble or commentary.
+        """
+        let glossary = Settings.shared.glossaryText
+        if !glossary.isEmpty {
+            prompt += """
+
+
+            Glossary — terms the speakers actually use. When a word in the transcript \
+            sounds like (or is a plausible mis-recognition of) a glossary term, use the \
+            exact glossary spelling. Lines of the form "wrong -> right" map a frequent \
+            mis-recognition to the preferred term.
+
+            \(glossary)
+            """
+        }
+        return prompt
+    }
+
     /// Refine `text`. On any failure the completion receives the original text so injection
     /// can still proceed.
     static func refine(_ text: String, completion: @escaping (Result<String, Error>) -> Void) {
@@ -58,22 +92,39 @@ enum LLMRefiner {
         )
     }
 
-    /// Used by both refinement and the Settings "Test" button.
+    /// Generate structured meeting notes from a raw long-form transcript,
+    /// using the configured provider and the user's glossary.
+    static func generateMeetingNotes(from transcript: String, completion: @escaping (Result<String, Error>) -> Void) {
+        let settings = Settings.shared
+        request(
+            text: transcript,
+            baseURL: settings.llmBaseURL,
+            apiKey: settings.llmAPIKey,
+            model: settings.llmModel,
+            proto: settings.llmProtocol,
+            systemPrompt: meetingNotesPrompt,
+            completion: completion
+        )
+    }
+
+    /// Used by refinement, meeting notes, and the Settings "Test" button.
     static func request(
         text: String,
         baseURL: String,
         apiKey: String,
         model: String,
         proto: LLMProtocol = .openai,
+        systemPrompt: String? = nil,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
+        let prompt = systemPrompt ?? self.systemPrompt
         switch proto {
         case .openai:
-            requestOpenAI(text: text, baseURL: baseURL, apiKey: apiKey, model: model, completion: completion)
+            requestOpenAI(text: text, baseURL: baseURL, apiKey: apiKey, model: model, systemPrompt: prompt, completion: completion)
         case .anthropic:
-            requestAnthropic(text: text, baseURL: baseURL, apiKey: apiKey, model: model, completion: completion)
+            requestAnthropic(text: text, baseURL: baseURL, apiKey: apiKey, model: model, systemPrompt: prompt, completion: completion)
         case .chatgpt:
-            requestChatGPT(text: text, model: model, completion: completion)
+            requestChatGPT(text: text, model: model, systemPrompt: prompt, completion: completion)
         }
     }
 
@@ -86,6 +137,7 @@ enum LLMRefiner {
     private static func requestChatGPT(
         text: String,
         model: String,
+        systemPrompt: String,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
         ChatGPTOAuth.shared.withFreshToken { tokenResult in
@@ -99,6 +151,7 @@ enum LLMRefiner {
                         return
                     }
                     sendChatGPT(text: text, model: model, instructions: instructions,
+                                systemPrompt: systemPrompt,
                                 access: token.access, accountID: token.accountID,
                                 completion: completion)
                 }
@@ -110,6 +163,7 @@ enum LLMRefiner {
         text: String,
         model: String,
         instructions: String,
+        systemPrompt: String,
         access: String,
         accountID: String,
         completion: @escaping (Result<String, Error>) -> Void
@@ -193,6 +247,7 @@ enum LLMRefiner {
         baseURL: String,
         apiKey: String,
         model: String,
+        systemPrompt: String,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
         guard let url = endpoint(from: baseURL, suffix: "chat/completions") else {
@@ -239,6 +294,7 @@ enum LLMRefiner {
         baseURL: String,
         apiKey: String,
         model: String,
+        systemPrompt: String,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
         guard let url = endpoint(from: baseURL, suffix: "messages") else {
@@ -248,7 +304,7 @@ enum LLMRefiner {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 1024,
+            "max_tokens": 4096,
             "temperature": 0,
             "system": systemPrompt,
             "messages": [

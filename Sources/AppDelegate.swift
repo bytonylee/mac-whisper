@@ -163,6 +163,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         subtitleItem.image = settings.subtitleOverlayEnabled ? menuIcon("checkmark") : nil
         menu.addItem(subtitleItem)
 
+        let notesItem = NSMenuItem(title: "Auto Meeting Notes", action: #selector(toggleMeetingNotes), keyEquivalent: "")
+        notesItem.target = self
+        notesItem.image = settings.meetingNotesEnabled ? menuIcon("checkmark") : nil
+        menu.addItem(notesItem)
+
         menu.addItem(.separator())
 
         // Reflect the locked-recording state in the menu-bar icon so a running
@@ -599,6 +604,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Generates structured meeting notes from the raw transcript via the LLM
+    /// (glossary included in the prompt) and saves them as notes-<stamp>.md.
+    /// Failures only log — the transcript file is already safe on disk.
+    private func generateMeetingNotes(from transcript: String, stamp: String, in dir: URL) {
+        NSLog("MacWhisper[App]: generating meeting notes chars=\(transcript.count)")
+        LLMRefiner.generateMeetingNotes(from: transcript) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let notes):
+                    let url = dir.appendingPathComponent("notes-\(stamp).md")
+                    do {
+                        try notes.write(to: url, atomically: true, encoding: .utf8)
+                        NSLog("MacWhisper[App]: meeting notes saved chars=\(notes.count)")
+                        SpeechService.diag("meeting notes saved -> \(url.lastPathComponent)")
+                        self.transcriptWindow.setStatus("Meeting notes saved: \(url.lastPathComponent)")
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    } catch {
+                        NSLog("MacWhisper[App]: failed to save meeting notes: \(error)")
+                    }
+                case .failure(let error):
+                    NSLog("MacWhisper[App]: meeting notes failed: \(error.localizedDescription)")
+                    SpeechService.diag("meeting notes FAILED: \(error.localizedDescription)")
+                    self.transcriptWindow.setStatus("Meeting notes failed — transcript is saved")
+                }
+            }
+        }
+    }
+
     /// Refines a saved long-form transcript with the configured LLM and updates
     /// the file in place. The raw text is already on disk, so any failure —
     /// network, quota, a bad chunk — simply leaves the original content.
@@ -699,6 +733,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } else {
                     transcriptWindow.setStatus("Saved to \(url.lastPathComponent)")
                 }
+                // Optionally turn the raw transcript into structured meeting
+                // notes (independent of the refinement toggle; runs off the
+                // raw text so neither task waits on the other).
+                if settings.meetingNotesEnabled && settings.llmConfigured {
+                    generateMeetingNotes(from: final, stamp: stamp, in: dir)
+                }
             } catch {
                 NSLog("MacWhisper[App]: failed to save transcript: \(error)")
             }
@@ -743,6 +783,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openTranscriptWindow() {
         transcriptWindow.showWindow()
+    }
+
+    @objc private func toggleMeetingNotes() {
+        settings.meetingNotesEnabled.toggle()
+        // Notes need an LLM; open settings when none is configured yet.
+        if settings.meetingNotesEnabled && !settings.llmConfigured {
+            openSettings()
+        }
+        rebuildMenu()
     }
 
     @objc private func toggleSubtitleOverlay() {

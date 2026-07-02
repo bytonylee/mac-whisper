@@ -53,6 +53,7 @@ final class Settings {
         static let longTriggerKeyPage = "longTriggerKeyPage"
         static let longTriggerKeyUsage = "longTriggerKeyUsage"
         static let longTriggerKeyMods = "longTriggerKeyModifiers"
+        static let meetingNotes = "meetingNotesEnabled"
     }
 
     /// Environment variable name holding the LLM API key. Set it via
@@ -169,6 +170,14 @@ final class Settings {
     var llmModel: String {
         get { defaults.string(forKey: Keys.llmModel) ?? "gpt-5.4-mini" }
         set { defaults.set(newValue, forKey: Keys.llmModel) }
+    }
+
+    /// Generate structured meeting notes with the LLM after a locked
+    /// (long-form) recording finishes. Off by default; requires a configured
+    /// LLM provider. The glossary is included so domain terms come out right.
+    var meetingNotesEnabled: Bool {
+        get { defaults.bool(forKey: Keys.meetingNotes) }
+        set { defaults.set(newValue, forKey: Keys.meetingNotes) }
     }
 
     /// Show caption-style subtitles at the bottom of the screen during a
