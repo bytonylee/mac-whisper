@@ -9,8 +9,14 @@ import IOKit.hid
 /// HID interface, where it is exposed on the AppleVendor top-case usage page
 /// (page 0xFF, usage 0x03). This requires Input Monitoring permission.
 final class FnKeyMonitor {
-    var onFnDown: (() -> Void)?
-    var onFnUp: (() -> Void)?
+    /// Callbacks receive the HID event capture time. Timing decisions (double-tap
+    /// detection) must use it — main-queue dispatch can lag behind the hardware
+    /// when the app is busy, which skews Date()-at-handling badly.
+    var onFnDown: ((Date) -> Void)?
+    var onFnUp: ((Date) -> Void)?
+    /// Fired when any real key goes down while Fn is held — the user is using
+    /// Fn as a modifier (Fn+arrows, Fn+F-keys, Fn+Backspace…), not dictating.
+    var onComboKeyWhileFnHeld: (() -> Void)?
 
     private var manager: IOHIDManager?
     private var fnDown = false
@@ -70,16 +76,33 @@ final class FnKeyMonitor {
 
     private func handle(value: IOHIDValue) {
         let element = IOHIDValueGetElement(value)
-        guard IOHIDElementGetUsagePage(element) == fnUsagePage,
-              IOHIDElementGetUsage(element) == fnUsage else { return }
+        let page = IOHIDElementGetUsagePage(element)
+        let usage = IOHIDElementGetUsage(element)
 
-        let pressed = IOHIDValueGetIntegerValue(value) != 0
-        guard pressed != fnDown else { return }
-        fnDown = pressed
-        NSLog("MacWhisper[Fn]: Fn \(pressed ? "DOWN" : "UP")")
+        if page == fnUsagePage, usage == fnUsage {
+            let pressed = IOHIDValueGetIntegerValue(value) != 0
+            guard pressed != fnDown else { return }
+            fnDown = pressed
+            let at = Date()
+            NSLog("MacWhisper[Fn]: Fn \(pressed ? "DOWN" : "UP")")
 
-        DispatchQueue.main.async { [weak self] in
-            if pressed { self?.onFnDown?() } else { self?.onFnUp?() }
+            DispatchQueue.main.async { [weak self] in
+                if pressed { self?.onFnDown?(at) } else { self?.onFnUp?(at) }
+            }
+            return
+        }
+
+        // Any real (non-modifier) key pressed while Fn is down means Fn is
+        // acting as a modifier for a shortcut. usage >= 4 skips the
+        // roll-over/error codes; usage < 0xE0 excludes Ctrl/Shift/Cmd/Opt,
+        // which legitimately arrive after Fn in the app's own ⌃Fn / ⌃⇧Fn
+        // gestures.
+        if fnDown, page == UInt32(kHIDPage_KeyboardOrKeypad),
+           usage >= 4, usage < 0xE0,
+           IOHIDValueGetIntegerValue(value) != 0 {
+            DispatchQueue.main.async { [weak self] in
+                self?.onComboKeyWhileFnHeld?()
+            }
         }
     }
 }
