@@ -6,7 +6,7 @@ import Foundation
 /// returns the input unchanged, preserving the speaker's original language.
 enum LLMRefiner {
 
-    private static let systemPrompt = """
+    private static let basePrompt = """
     You are a speech-recognition post-editor. Your only task is to fix obvious \
     speech-recognition errors. Never paraphrase, rewrite, embellish, expand, or shorten.
 
@@ -19,6 +19,25 @@ enum LLMRefiner {
     4. Never add any explanation, prefix, suffix, quotation marks, or commentary.
     5. Output only the corrected text itself, nothing else.
     """
+
+    /// System prompt, extended with the user's glossary when one is attached.
+    /// The glossary biases corrections toward the speaker's domain terms —
+    /// names, products, jargon — that recognizers habitually get wrong.
+    private static var systemPrompt: String {
+        let glossary = Settings.shared.glossaryText
+        guard !glossary.isEmpty else { return basePrompt }
+        return basePrompt + """
+
+
+        Glossary — terms this speaker actually uses. When a word in the input sounds like \
+        (or is a plausible mis-transcription of) a glossary term, replace it with the exact \
+        glossary spelling. Lines of the form "wrong -> right" map a frequent \
+        mis-transcription directly to the preferred term. Never insert glossary terms that \
+        were not plausibly spoken.
+
+        \(glossary)
+        """
+    }
 
     struct RefineError: LocalizedError {
         let message: String
@@ -53,7 +72,118 @@ enum LLMRefiner {
             requestOpenAI(text: text, baseURL: baseURL, apiKey: apiKey, model: model, completion: completion)
         case .anthropic:
             requestAnthropic(text: text, baseURL: baseURL, apiKey: apiKey, model: model, completion: completion)
+        case .chatgpt:
+            requestChatGPT(text: text, model: model, completion: completion)
         }
+    }
+
+    // MARK: - ChatGPT subscription (Codex backend, OAuth)
+
+    /// Calls the ChatGPT backend Responses endpoint using the subscription OAuth
+    /// token. The backend requires the Codex CLI system prompt in `instructions`
+    /// and store=false + stream=true; our refinement prompt rides along as a
+    /// developer message in `input`.
+    private static func requestChatGPT(
+        text: String,
+        model: String,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        ChatGPTOAuth.shared.withFreshToken { tokenResult in
+            switch tokenResult {
+            case .failure(let error):
+                completion(.failure(error))
+            case .success(let token):
+                CodexInstructions.fetch(for: model) { instructions in
+                    guard let instructions else {
+                        completion(.failure(RefineError(message: "Could not load Codex instructions (network required on first use)")))
+                        return
+                    }
+                    sendChatGPT(text: text, model: model, instructions: instructions,
+                                access: token.access, accountID: token.accountID,
+                                completion: completion)
+                }
+            }
+        }
+    }
+
+    private static func sendChatGPT(
+        text: String,
+        model: String,
+        instructions: String,
+        access: String,
+        accountID: String,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        let url = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
+        let body: [String: Any] = [
+            "model": model,
+            "instructions": instructions,
+            "input": [
+                ["type": "message", "role": "developer",
+                 "content": [["type": "input_text", "text": systemPrompt]]],
+                ["type": "message", "role": "user",
+                 "content": [["type": "input_text", "text": text]]],
+            ],
+            "store": false,
+            "stream": true,
+            "include": ["reasoning.encrypted_content"],
+            "reasoning": ["effort": "low", "summary": "auto"],
+        ]
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 60
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(access)", forHTTPHeaderField: "Authorization")
+        req.setValue(accountID, forHTTPHeaderField: "chatgpt-account-id")
+        req.setValue("responses=experimental", forHTTPHeaderField: "OpenAI-Beta")
+        req.setValue("codex_cli_rs", forHTTPHeaderField: "originator")
+        req.setValue("text/event-stream", forHTTPHeaderField: "accept")
+        req.setValue(UUID().uuidString, forHTTPHeaderField: "session_id")
+        do {
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            completion(.failure(RefineError(message: "Failed to build request: \(error.localizedDescription)")))
+            return
+        }
+
+        send(req, original: text) { data in
+            parseSSEOutputText(data)
+        } completion: { completion($0) }
+    }
+
+    /// Extracts the assistant's final text from a Responses-API SSE stream.
+    /// Prefers the terminal response.completed/response.done payload; falls back
+    /// to accumulated response.output_text.delta events.
+    private static func parseSSEOutputText(_ data: Data) -> String? {
+        guard let raw = String(data: data, encoding: .utf8) else { return nil }
+        var finalText: String?
+        var deltas = ""
+        for line in raw.split(separator: "\n") {
+            guard line.hasPrefix("data: ") else { continue }
+            let payload = line.dropFirst(6)
+            if payload == "[DONE]" { continue }
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any],
+                  let type = obj["type"] as? String else { continue }
+            switch type {
+            case "response.output_text.delta":
+                if let d = obj["delta"] as? String { deltas += d }
+            case "response.completed", "response.done":
+                guard let resp = obj["response"] as? [String: Any],
+                      let output = resp["output"] as? [[String: Any]] else { continue }
+                var texts: [String] = []
+                for item in output where (item["type"] as? String) == "message" {
+                    for part in (item["content"] as? [[String: Any]] ?? [])
+                    where (part["type"] as? String) == "output_text" {
+                        if let t = part["text"] as? String { texts.append(t) }
+                    }
+                }
+                if !texts.isEmpty { finalText = texts.joined() }
+            default:
+                break
+            }
+        }
+        return finalText ?? (deltas.isEmpty ? nil : deltas)
     }
 
     // MARK: - OpenAI-compatible

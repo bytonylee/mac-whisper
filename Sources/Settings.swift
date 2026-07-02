@@ -45,6 +45,8 @@ final class Settings {
         static let llmBaseURL = "llmBaseURL"
         static let llmModel = "llmModel"
         static let silenceAutoStop = "silenceAutoStopEnabled"
+        static let glossaryPath = "glossaryPath"
+        static let subtitleOverlay = "subtitleOverlayEnabled"
     }
 
     /// Environment variable name holding the LLM API key. Set it via
@@ -92,6 +94,7 @@ final class Settings {
         // user's choice.
         defaults.register(defaults: [
             Keys.silenceAutoStop: true,
+            Keys.subtitleOverlay: true,
         ])
     }
 
@@ -162,9 +165,69 @@ final class Settings {
         set { defaults.set(newValue, forKey: Keys.llmModel) }
     }
 
+    /// Show caption-style subtitles at the bottom of the screen during a
+    /// locked (long-form) recording.
+    var subtitleOverlayEnabled: Bool {
+        get { defaults.bool(forKey: Keys.subtitleOverlay) }
+        set { defaults.set(newValue, forKey: Keys.subtitleOverlay) }
+    }
+
+    // MARK: - Glossary
+
+    /// Default glossary location, used when the user hasn't attached a file.
+    static var defaultGlossaryURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".config/macwhisper/glossary.txt")
+    }
+
+    /// Path to the attached glossary text file. One term per line; `#` lines are
+    /// comments; `wrong -> right` lines map a common mis-transcription to the
+    /// preferred spelling.
+    var glossaryURL: URL {
+        get {
+            if let path = defaults.string(forKey: Keys.glossaryPath), !path.isEmpty {
+                return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            }
+            return Self.defaultGlossaryURL
+        }
+        set { defaults.set(newValue.path, forKey: Keys.glossaryPath) }
+    }
+
+    /// Raw glossary text for the LLM prompt, capped so a huge file can't blow up
+    /// every request. Empty string when the file is missing or empty.
+    var glossaryText: String {
+        guard let text = try? String(contentsOf: glossaryURL, encoding: .utf8) else { return "" }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(trimmed.prefix(8000))
+    }
+
+    /// Individual terms for speech-recognition hints (SFSpeechRecognizer
+    /// contextualStrings). For mapping lines only the right-hand side is a real
+    /// term; comments and blanks are skipped.
+    var glossaryTerms: [String] {
+        var terms: [String] = []
+        for rawLine in glossaryText.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            let term: String
+            if let range = line.range(of: "->") ?? line.range(of: "→") {
+                term = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            } else {
+                term = line
+            }
+            if !term.isEmpty { terms.append(term) }
+        }
+        return Array(terms.prefix(500))
+    }
+
     /// LLM refinement is usable only when enabled and minimally configured.
+    /// The ChatGPT subscription provider authenticates via OAuth, not an API key.
     var llmConfigured: Bool {
-        !llmBaseURL.trimmingCharacters(in: .whitespaces).isEmpty &&
+        if llmProtocol == .chatgpt {
+            return ChatGPTOAuth.shared.isSignedIn &&
+                !llmModel.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        return !llmBaseURL.trimmingCharacters(in: .whitespaces).isEmpty &&
         !llmAPIKey.trimmingCharacters(in: .whitespaces).isEmpty &&
         !llmModel.trimmingCharacters(in: .whitespaces).isEmpty
     }
