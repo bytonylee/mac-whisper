@@ -9,7 +9,6 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/tag-0.0.1-111111?style=flat-square" alt="Tag 0.0.1">
   <img src="https://img.shields.io/badge/version-0.0.1-111111?style=flat-square" alt="Version 0.0.1">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/macOS-26%2B-111111?style=flat-square" alt="macOS 26+">
