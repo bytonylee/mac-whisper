@@ -50,41 +50,34 @@ enum LLMRefiner {
     private static func meetingNotesPrompt(meetingDate: String) -> String {
         var prompt = """
         You are a professional minute-taker. Turn the raw speech-to-text transcript of a \
-        meeting into FORMAL, DETAILED meeting minutes (회의록) — a document fit for \
-        record-keeping, not casual notes. Write in the SAME language as the transcript \
-        (do not translate). Localize all headings and labels to that language.
+        meeting into meeting minutes (회의록), written in the SAME language as the \
+        transcript (do not translate). Localize all headings and labels to that language.
 
-        The document MUST follow this structure (Markdown):
+        Minimum required content — always include, as far as the transcript supports it:
+        - A title and a meeting overview: date/time (use "\(meetingDate)"), the \
+        attendees identifiable from the transcript, and the agenda items that were \
+        discussed.
+        - The discussion itself: what was talked about and by whom, with the reasons, \
+        trade-offs, numbers, dates, names, examples, and concerns that were actually \
+        raised.
+        - Decisions that were made, and action items (with owner and due date when one \
+        was mentioned).
 
-        # 회의록: <one-line meeting title>
+        Beyond that minimum, choose the structure, depth, and length that best fit this \
+        particular meeting. A decision meeting, a brainstorm, a status sync, and a \
+        design review each deserve differently shaped minutes — organize accordingly.
 
-        **1. 회의 개요** — a table with rows: 일시 (use "\(meetingDate)"), 참석자 \
-        (speakers/names identified from the transcript; write "확인 불가" if none are \
-        identifiable), 안건 (numbered list of the major agenda items discussed).
-
-        **2. 안건별 논의 내용** — one numbered subsection ("### 2.N <안건>") per agenda \
-        item, in the order discussed. Inside each: 배경 (why it came up, when stated), \
-        논의 (the substantive back-and-forth as bullets — who argued what and why, \
-        reasons, trade-offs, alternatives considered, concerns, concrete numbers, dates, \
-        names, examples), and 결론 (where that item landed, or "결론 없이 추후 재논의").
-
-        **3. 결정 사항** — a numbered table (번호 | 결정 내용 | 관련 안건). If none, \
-        state so in one line.
-
-        **4. 액션 아이템** — a table (항목 | 담당 | 기한). Use "미지정" when the owner \
-        or due date was not mentioned. If none, state so in one line.
-
-        **5. 기타 / 다음 일정** — only if the transcript contains it; omit otherwise.
+        Length is not a constraint, in either direction — never shorten the minutes to \
+        be tidy. Do not summarize away substance: a reader who missed the meeting must \
+        be able to follow each discussion — who said what, why, what was weighed, and \
+        how it landed. When in doubt whether a point is substantive, include it. Leave \
+        out only filler, small talk, and verbatim repetition.
 
         Rules:
         1. The transcript comes from speech recognition and contains mis-recognized \
         words; silently correct them from context. Never invent content — attendees, \
         decisions, dates — that the transcript does not support.
-        2. Detail matters more than brevity, especially in section 2: the minutes must \
-        scale with the meeting (a long meeting produces long minutes, roughly a quarter \
-        to a third of the transcript). Omit only filler, small talk, and verbatim \
-        repetition — never compress an agenda item to a single line.
-        3. Output only the document, no preamble or commentary.
+        2. Output Markdown, and only the document itself — no preamble or commentary.
         """
         let glossary = Settings.shared.glossaryText
         if !glossary.isEmpty {
@@ -128,6 +121,7 @@ enum LLMRefiner {
             model: settings.llmModel,
             proto: settings.llmProtocol,
             systemPrompt: meetingNotesPrompt(meetingDate: meetingDate),
+            reasoningEffort: "medium",
             completion: completion
         )
     }
@@ -140,6 +134,7 @@ enum LLMRefiner {
         model: String,
         proto: LLMProtocol = .openai,
         systemPrompt: String? = nil,
+        reasoningEffort: String = "low",
         completion: @escaping (Result<String, Error>) -> Void
     ) {
         let prompt = systemPrompt ?? self.systemPrompt
@@ -149,7 +144,7 @@ enum LLMRefiner {
         case .anthropic:
             requestAnthropic(text: text, baseURL: baseURL, apiKey: apiKey, model: model, systemPrompt: prompt, completion: completion)
         case .chatgpt:
-            requestChatGPT(text: text, model: model, systemPrompt: prompt, completion: completion)
+            requestChatGPT(text: text, model: model, systemPrompt: prompt, reasoningEffort: reasoningEffort, completion: completion)
         }
     }
 
@@ -163,6 +158,7 @@ enum LLMRefiner {
         text: String,
         model: String,
         systemPrompt: String,
+        reasoningEffort: String,
         completion: @escaping (Result<String, Error>) -> Void
     ) {
         ChatGPTOAuth.shared.withFreshToken { tokenResult in
@@ -176,7 +172,7 @@ enum LLMRefiner {
                         return
                     }
                     sendChatGPT(text: text, model: model, instructions: instructions,
-                                systemPrompt: systemPrompt,
+                                systemPrompt: systemPrompt, reasoningEffort: reasoningEffort,
                                 access: token.access, accountID: token.accountID,
                                 completion: completion)
                 }
@@ -189,6 +185,7 @@ enum LLMRefiner {
         model: String,
         instructions: String,
         systemPrompt: String,
+        reasoningEffort: String,
         access: String,
         accountID: String,
         completion: @escaping (Result<String, Error>) -> Void
@@ -206,7 +203,7 @@ enum LLMRefiner {
             "store": false,
             "stream": true,
             "include": ["reasoning.encrypted_content"],
-            "reasoning": ["effort": "low", "summary": "auto"],
+            "reasoning": ["effort": reasoningEffort, "summary": "auto"],
         ]
 
         var req = URLRequest(url: url)
