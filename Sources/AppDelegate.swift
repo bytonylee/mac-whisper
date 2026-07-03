@@ -588,6 +588,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return formatter.string(from: Date())
     }
 
+    /// "yyyy-MM-dd_HH-mm-ss" file stamp → "yyyy-MM-dd HH:mm" for the minutes'
+    /// 일시 field.
+    private static func meetingDateString(from stamp: String) -> String {
+        let parts = stamp.split(separator: "_")
+        guard parts.count == 2 else { return stamp }
+        let time = parts[1].split(separator: "-")
+        guard time.count >= 2 else { return String(parts[0]) }
+        return "\(parts[0]) \(time[0]):\(time[1])"
+    }
+
     /// Serial queue for transcript autosaves — atomic writes on the main
     /// thread would stutter the UI during long sessions.
     private let autosaveQueue = DispatchQueue(label: "macwhisper.autosave", qos: .utility)
@@ -609,7 +619,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Failures only log — the transcript file is already safe on disk.
     private func generateMeetingNotes(from transcript: String, stamp: String, in dir: URL) {
         NSLog("MacWhisper[App]: generating meeting notes chars=\(transcript.count)")
-        LLMRefiner.generateMeetingNotes(from: transcript) { [weak self] result in
+        LLMRefiner.generateMeetingNotes(from: transcript, meetingDate: Self.meetingDateString(from: stamp)) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
                 switch result {

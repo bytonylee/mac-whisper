@@ -44,29 +44,47 @@ enum LLMRefiner {
         var errorDescription: String? { message }
     }
 
-    /// System prompt for turning a raw meeting transcript into structured
-    /// minutes. The glossary is appended so domain terms come out right.
-    private static var meetingNotesPrompt: String {
+    /// System prompt for turning a raw meeting transcript into formal,
+    /// detailed minutes. The glossary is appended so domain terms come out
+    /// right. `meetingDate` (the recording timestamp) fills the 일시 field.
+    private static func meetingNotesPrompt(meetingDate: String) -> String {
         var prompt = """
         You are a professional minute-taker. Turn the raw speech-to-text transcript of a \
-        meeting into DETAILED, structured meeting notes, written in the SAME language as \
-        the transcript (do not translate).
+        meeting into FORMAL, DETAILED meeting minutes (회의록) — a document fit for \
+        record-keeping, not casual notes. Write in the SAME language as the transcript \
+        (do not translate). Localize all headings and labels to that language.
+
+        The document MUST follow this structure (Markdown):
+
+        # 회의록: <one-line meeting title>
+
+        **1. 회의 개요** — a table with rows: 일시 (use "\(meetingDate)"), 참석자 \
+        (speakers/names identified from the transcript; write "확인 불가" if none are \
+        identifiable), 안건 (numbered list of the major agenda items discussed).
+
+        **2. 안건별 논의 내용** — one numbered subsection ("### 2.N <안건>") per agenda \
+        item, in the order discussed. Inside each: 배경 (why it came up, when stated), \
+        논의 (the substantive back-and-forth as bullets — who argued what and why, \
+        reasons, trade-offs, alternatives considered, concerns, concrete numbers, dates, \
+        names, examples), and 결론 (where that item landed, or "결론 없이 추후 재논의").
+
+        **3. 결정 사항** — a numbered table (번호 | 결정 내용 | 관련 안건). If none, \
+        state so in one line.
+
+        **4. 액션 아이템** — a table (항목 | 담당 | 기한). Use "미지정" when the owner \
+        or due date was not mentioned. If none, state so in one line.
+
+        **5. 기타 / 다음 일정** — only if the transcript contains it; omit otherwise.
 
         Rules:
-        1. The transcript comes from speech recognition and contains mis-recognized words; \
-        silently correct them from context. Never invent content that was not said.
-        2. Detail matters more than brevity. The notes must scale with the meeting: a long \
-        meeting produces long notes. Preserve every substantive point — who argued what \
-        and why, reasons and trade-offs, alternatives considered, concerns raised, \
-        concrete numbers, dates, names, and examples. Omit only filler, small talk, and \
-        verbatim repetition. As a guide, the notes for a long meeting should be roughly a \
-        quarter to a third of the transcript's length — never a one-line-per-topic digest.
-        3. Structure (Markdown, headings localized to the transcript's language): a \
-        one-line title, then one "## <topic>" section per major discussion topic in the \
-        order it came up. Under each topic, capture the flow of that discussion as \
-        bullets and short paragraphs — not a single summary line. End with decisions and \
-        action-item sections (owner noted when one was mentioned) only if any exist.
-        4. Output only the notes, no preamble or commentary.
+        1. The transcript comes from speech recognition and contains mis-recognized \
+        words; silently correct them from context. Never invent content — attendees, \
+        decisions, dates — that the transcript does not support.
+        2. Detail matters more than brevity, especially in section 2: the minutes must \
+        scale with the meeting (a long meeting produces long minutes, roughly a quarter \
+        to a third of the transcript). Omit only filler, small talk, and verbatim \
+        repetition — never compress an agenda item to a single line.
+        3. Output only the document, no preamble or commentary.
         """
         let glossary = Settings.shared.glossaryText
         if !glossary.isEmpty {
@@ -98,9 +116,10 @@ enum LLMRefiner {
         )
     }
 
-    /// Generate structured meeting notes from a raw long-form transcript,
-    /// using the configured provider and the user's glossary.
-    static func generateMeetingNotes(from transcript: String, completion: @escaping (Result<String, Error>) -> Void) {
+    /// Generate formal meeting minutes from a raw long-form transcript,
+    /// using the configured provider and the user's glossary. `meetingDate`
+    /// is the recording timestamp shown in the 회의 개요 table.
+    static func generateMeetingNotes(from transcript: String, meetingDate: String, completion: @escaping (Result<String, Error>) -> Void) {
         let settings = Settings.shared
         request(
             text: transcript,
@@ -108,7 +127,7 @@ enum LLMRefiner {
             apiKey: settings.llmAPIKey,
             model: settings.llmModel,
             proto: settings.llmProtocol,
-            systemPrompt: meetingNotesPrompt,
+            systemPrompt: meetingNotesPrompt(meetingDate: meetingDate),
             completion: completion
         )
     }
