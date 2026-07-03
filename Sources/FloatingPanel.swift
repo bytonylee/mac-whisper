@@ -20,7 +20,8 @@ final class FloatingPanel {
     /// (`box-shadow: inset … rgba(255,255,255,0.5)`) from the reference recipe.
     private let shineLayer = CAShapeLayer()
 
-    private let panelHeight: CGFloat = 56
+    private let panelBaseHeight: CGFloat = 56
+    private let verticalTextPadding: CGFloat = 24
     private let cornerRadius: CGFloat = 28
     private let leftPadding: CGFloat = 18
     private let waveWidth: CGFloat = 44
@@ -39,11 +40,11 @@ final class FloatingPanel {
     /// Natural height of a single line of the transcript font, used to vertically
     /// center the text within the capsule.
     private var textHeight: CGFloat { ceil(textFont.ascender - textFont.descender + textFont.leading) }
-    private var textY: CGFloat { (panelHeight - textHeight) / 2 }
+    private func textFieldY(forHeight height: CGFloat, textBlockHeight: CGFloat) -> CGFloat { (height - textBlockHeight) / 2 }
 
     init() {
         let initialWidth = (leftPadding + waveWidth + gap) * 2 + minTextWidth
-        let rect = NSRect(x: 0, y: 0, width: initialWidth, height: panelHeight)
+        let rect = NSRect(x: 0, y: 0, width: initialWidth, height: panelBaseHeight)
 
         panel = NSPanel(
             contentRect: rect,
@@ -66,12 +67,14 @@ final class FloatingPanel {
             glass.cornerRadius = cornerRadius
             // `.regular` is the full Liquid Glass material (frosting, refraction
             // and adaptive edge highlights) — the headline WWDC25 look. `.clear`
-            // renders as a near-invisible transparent gray, so use `.regular`. A
-            // subtle white tint emulates the reference `.liquidGlass-tint`
-            // (`rgba(255,255,255,0.25)`) milky glass without washing out the
-            // white transcript text.
+            // renders as a near-invisible transparent gray, so use `.regular`.
+            // Liquid Glass adapts its look to whatever is behind it, which means
+            // a light tint (the original design) turns the capsule near-white —
+            // and unreadable — over light backgrounds/pages. A dark tint biases
+            // it toward a consistently dark capsule regardless of what's behind,
+            // so the white transcript/waveform stay legible everywhere.
             glass.style = .regular
-            glass.tintColor = NSColor.white.withAlphaComponent(0.12)
+            glass.tintColor = NSColor.black.withAlphaComponent(0.55)
             glass.autoresizingMask = [.width, .height]
             glass.wantsLayer = true
             backgroundView = glass
@@ -101,6 +104,13 @@ final class FloatingPanel {
         // Liquid-glass "shine": a bright inset rim drawn just inside the capsule
         // edge, mirroring the reference CSS inset white box-shadow.
         contentHost.wantsLayer = true
+        // Liquid Glass's tint alone isn't enough to guarantee contrast — it still
+        // lightens noticeably over bright content. A solid dark scrim behind the
+        // waveform/text guarantees legibility regardless of what's underneath,
+        // while the glass blur/refraction still shows through at ~28% opacity.
+        contentHost.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor
+        contentHost.layer?.cornerRadius = cornerRadius
+        contentHost.layer?.masksToBounds = true
         shineLayer.fillColor = NSColor.clear.cgColor
         shineLayer.strokeColor = NSColor.white.withAlphaComponent(0.5).cgColor
         shineLayer.lineWidth = 1.5
@@ -120,7 +130,7 @@ final class FloatingPanel {
 
         waveform = WaveformView(frame: NSRect(
             x: leftPadding,
-            y: (panelHeight - waveHeight) / 2,
+            y: (panelBaseHeight - waveHeight) / 2,
             width: waveWidth,
             height: waveHeight
         ))
@@ -136,12 +146,13 @@ final class FloatingPanel {
         textField.isEditable = false
         textField.isSelectable = false
         textField.drawsBackground = false
-        textField.lineBreakMode = .byTruncatingTail
-        textField.maximumNumberOfLines = 1
-        textField.cell?.usesSingleLineMode = true
+        textField.lineBreakMode = .byWordWrapping
+        textField.maximumNumberOfLines = 0
+        textField.cell?.wraps = true
+        textField.cell?.usesSingleLineMode = false
         textField.frame = NSRect(
             x: leftPadding + waveWidth + gap,
-            y: textY,
+            y: textFieldY(forHeight: panelBaseHeight, textBlockHeight: textHeight),
             width: minTextWidth,
             height: textHeight
         )
@@ -156,7 +167,7 @@ final class FloatingPanel {
     func show(placeholder: String) {
         textField.stringValue = placeholder
         textField.alphaValue = 0.55
-        resize(toTextWidth: minTextWidth, animated: false)
+        resize(to: CGSize(width: minTextWidth, height: textHeight), animated: false)
         position()
 
         panel.alphaValue = 0
@@ -190,16 +201,16 @@ final class FloatingPanel {
     func updateText(_ text: String) {
         textField.alphaValue = 1.0
         textField.stringValue = text
-        let needed = measuredTextWidth(text)
-        resize(toTextWidth: needed, animated: true)
+        let size = measuredTextSize(for: text)
+        resize(to: size, animated: true)
     }
 
     /// Show a transient status (e.g., "Refining…") with a slightly dimmed style.
     func showStatus(_ status: String) {
         textField.alphaValue = 0.7
         textField.stringValue = status
-        let needed = measuredTextWidth(status)
-        resize(toTextWidth: needed, animated: true)
+        let size = measuredTextSize(for: status)
+        resize(to: size, animated: true)
     }
 
     func hide(completion: (() -> Void)? = nil) {
@@ -226,26 +237,44 @@ final class FloatingPanel {
 
     // MARK: - Layout
 
-    private func measuredTextWidth(_ text: String) -> CGFloat {
+    /// Measures the space the transcript needs: grows horizontally up to
+    /// `maxTextWidth` as a single line, then wraps onto additional lines
+    /// (growing the capsule taller) so the full text stays visible.
+    private func measuredTextSize(for text: String) -> CGSize {
         let attr = [NSAttributedString.Key.font: textFont]
-        let size = (text as NSString).size(withAttributes: attr)
-        return min(maxTextWidth, max(minTextWidth, ceil(size.width) + 8))
+        let singleLineWidth = ceil((text as NSString).size(withAttributes: attr).width) + 8
+        if singleLineWidth <= maxTextWidth {
+            return CGSize(width: max(minTextWidth, singleLineWidth), height: textHeight)
+        }
+        // NSString.boundingRect under-measures wrapped CJK text in practice
+        // (it plateaus after ~2 lines regardless of length) — the text field's
+        // own cell, which is what actually lays the glyphs out, is reliable.
+        let fitting = textField.cell?.cellSize(
+            forBounds: NSRect(x: 0, y: 0, width: maxTextWidth, height: .greatestFiniteMagnitude)
+        ) ?? NSSize(width: maxTextWidth, height: textHeight)
+        return CGSize(width: maxTextWidth, height: max(textHeight, ceil(fitting.height)))
     }
 
-    private func resize(toTextWidth textWidth: CGFloat, animated: Bool) {
-        let totalWidth = sideInset * 2 + textWidth
+    private func resize(to textSize: CGSize, animated: Bool) {
+        let totalWidth = sideInset * 2 + textSize.width
+        let totalHeight = max(panelBaseHeight, textSize.height + verticalTextPadding)
+
         var frame = panel.frame
-        // Keep horizontally centered while growing.
+        // Keep horizontally centered while growing; the bottom edge stays
+        // anchored (origin.y untouched) so taller capsules grow upward
+        // instead of running off the bottom of the screen.
         let centerX = frame.midX
         frame.size.width = totalWidth
+        frame.size.height = totalHeight
         frame.origin.x = centerX - totalWidth / 2
 
         textField.frame = NSRect(
             x: sideInset,
-            y: textY,
-            width: textWidth,
-            height: textHeight
+            y: textFieldY(forHeight: totalHeight, textBlockHeight: textSize.height),
+            width: textSize.width,
+            height: textSize.height
         )
+        waveform.frame.origin.y = (totalHeight - waveHeight) / 2
 
         if animated {
             NSAnimationContext.runAnimationGroup { ctx in
@@ -256,17 +285,17 @@ final class FloatingPanel {
         } else {
             panel.setFrame(frame, display: true)
         }
-        updateShine(width: totalWidth)
+        updateShine(width: totalWidth, height: totalHeight)
     }
 
     /// Sizes the liquid-glass shine rim to the current capsule width.
-    private func updateShine(width: CGFloat) {
+    private func updateShine(width: CGFloat, height: CGFloat) {
         let inset = shineLayer.lineWidth / 2
-        let rect = CGRect(x: inset, y: inset, width: width - inset * 2, height: panelHeight - inset * 2)
+        let rect = CGRect(x: inset, y: inset, width: width - inset * 2, height: height - inset * 2)
         let radius = max(0, cornerRadius - inset)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        shineLayer.frame = CGRect(x: 0, y: 0, width: width, height: panelHeight)
+        shineLayer.frame = CGRect(x: 0, y: 0, width: width, height: height)
         shineLayer.path = CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
         CATransaction.commit()
     }
