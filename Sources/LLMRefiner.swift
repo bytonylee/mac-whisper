@@ -49,17 +49,23 @@ enum LLMRefiner {
     private static var meetingNotesPrompt: String {
         var prompt = """
         You are a professional minute-taker. Turn the raw speech-to-text transcript of a \
-        meeting into clear, structured meeting notes, written in the SAME language as the \
-        transcript (do not translate).
+        meeting into DETAILED, structured meeting notes, written in the SAME language as \
+        the transcript (do not translate).
 
         Rules:
         1. The transcript comes from speech recognition and contains mis-recognized words; \
         silently correct them from context. Never invent content that was not said.
-        2. Output Markdown with these sections (localize the headings to the transcript's \
-        language): a one-line title; Summary (2-4 sentences); Key discussion points \
-        (bullets); Decisions (bullets, or "none"); Action items (bullets with owner when \
-        one was mentioned).
-        3. Be faithful and concise — notes, not a re-telling.
+        2. Detail matters more than brevity. The notes must scale with the meeting: a long \
+        meeting produces long notes. Preserve every substantive point — who argued what \
+        and why, reasons and trade-offs, alternatives considered, concerns raised, \
+        concrete numbers, dates, names, and examples. Omit only filler, small talk, and \
+        verbatim repetition. As a guide, the notes for a long meeting should be roughly a \
+        quarter to a third of the transcript's length — never a one-line-per-topic digest.
+        3. Structure (Markdown, headings localized to the transcript's language): a \
+        one-line title, then one "## <topic>" section per major discussion topic in the \
+        order it came up. Under each topic, capture the flow of that discussion as \
+        bullets and short paragraphs — not a single summary line. End with decisions and \
+        action-item sections (owner noted when one was mentioned) only if any exist.
         4. Output only the notes, no preamble or commentary.
         """
         let glossary = Settings.shared.glossaryText
@@ -304,7 +310,7 @@ enum LLMRefiner {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 4096,
+            "max_tokens": 16384,
             "temperature": 0,
             "system": systemPrompt,
             "messages": [
