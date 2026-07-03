@@ -4,6 +4,7 @@ import Foundation
 enum LLMProtocol {
     case openai      // POST {base}/chat/completions, Authorization: Bearer
     case anthropic   // POST {base}/messages, x-api-key + anthropic-version
+    case chatgpt     // POST chatgpt.com/backend-api/codex/responses, OAuth (ChatGPT subscription)
 }
 
 /// A curated LLM provider with its endpoint and a short list of recent models.
@@ -34,6 +35,15 @@ struct LLMProvider {
 
     /// All selectable providers, in menu order. `custom` is last.
     static let all: [LLMProvider] = [
+        LLMProvider(
+            id: "chatgpt", displayName: "ChatGPT (Plus/Pro Subscription)",
+            baseURL: "https://chatgpt.com/backend-api", proto: .chatgpt,
+            // Must match the backend's model catalog (GET /codex/models); older
+            // gpt-5.1/5.2 slugs are rejected with HTTP 400 as of mid-2026.
+            models: ["gpt-5.4-mini", "gpt-5.5", "gpt-5.4"],
+            defaultModel: "gpt-5.4-mini",
+            reasoningEfforts: ["low", "medium", "high"]
+        ),
         LLMProvider(
             id: "openai", displayName: "OpenAI",
             baseURL: "https://api.openai.com/v1", proto: .openai,

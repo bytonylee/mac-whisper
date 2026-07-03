@@ -1,4 +1,5 @@
 import Cocoa
+import UniformTypeIdentifiers
 
 /// Window for configuring the LLM endpoint used for refinement. Provider and model
 /// are chosen from dropdowns (curated from the opencode / models.dev registry). The
@@ -11,12 +12,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let modelField = NSTextField()          // shown only for the custom provider
     private let baseURLField = NSTextField()        // editable only for the custom provider
     private let baseURLLabel = NSTextField(labelWithString: "API Base URL:")
+    private var apiKeyLabel: NSTextField!
     private let apiKeyStatusLabel = NSTextField(labelWithString: "")
+    private let chatgptAuthButton = NSButton()
+    private let glossaryStatusLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 300),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -53,8 +57,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         }
 
         // Provider dropdown.
-        _ = label("Provider:", y: 252)
-        providerPopup.frame = NSRect(x: fieldX, y: 250, width: fieldWidth, height: 26)
+        _ = label("Provider:", y: 312)
+        providerPopup.frame = NSRect(x: fieldX, y: 310, width: fieldWidth, height: 26)
         providerPopup.target = self
         providerPopup.action = #selector(providerChanged)
         for provider in LLMProvider.all {
@@ -64,28 +68,56 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         content.addSubview(providerPopup)
 
         // Model dropdown (known providers).
-        _ = label("Model:", y: 210)
-        modelPopup.frame = NSRect(x: fieldX, y: 208, width: fieldWidth, height: 26)
+        _ = label("Model:", y: 270)
+        modelPopup.frame = NSRect(x: fieldX, y: 268, width: fieldWidth, height: 26)
         content.addSubview(modelPopup)
 
         // Model text field (custom provider) — occupies the same row as the popup.
-        style(modelField, y: 210)
+        style(modelField, y: 270)
         modelField.placeholderString = "gpt-4o-mini"
 
         // Base URL (custom provider only).
-        baseURLLabel.frame = NSRect(x: 16, y: 168, width: labelWidth, height: 22)
+        baseURLLabel.frame = NSRect(x: 16, y: 228, width: labelWidth, height: 22)
         baseURLLabel.alignment = .right
         content.addSubview(baseURLLabel)
-        style(baseURLField, y: 168)
+        style(baseURLField, y: 228)
         baseURLField.placeholderString = "https://api.openai.com/v1"
 
         // API key — read from the environment, not entered here. Shows whether the
-        // key was found so the user knows if refinement will work.
-        _ = label("API Key:", y: 126)
-        apiKeyStatusLabel.frame = NSRect(x: fieldX, y: 128, width: fieldWidth, height: 22)
+        // key was found so the user knows if refinement will work. For the ChatGPT
+        // subscription provider this row shows OAuth sign-in state instead.
+        apiKeyLabel = label("API Key:", y: 186)
+        apiKeyStatusLabel.frame = NSRect(x: fieldX, y: 188, width: fieldWidth, height: 22)
         apiKeyStatusLabel.font = .systemFont(ofSize: 11)
         apiKeyStatusLabel.textColor = .secondaryLabelColor
         content.addSubview(apiKeyStatusLabel)
+
+        // OAuth sign in/out for the ChatGPT subscription provider.
+        chatgptAuthButton.title = "Sign in with ChatGPT"
+        chatgptAuthButton.bezelStyle = .rounded
+        chatgptAuthButton.frame = NSRect(x: fieldX, y: 154, width: 190, height: 30)
+        chatgptAuthButton.target = self
+        chatgptAuthButton.action = #selector(chatgptAuthTapped)
+        content.addSubview(chatgptAuthButton)
+
+        // Glossary — a plain text file of domain terms fed to both speech
+        // recognition (contextual hints) and the LLM refinement prompt.
+        _ = label("Glossary:", y: 116)
+        glossaryStatusLabel.frame = NSRect(x: fieldX, y: 118, width: 150, height: 22)
+        glossaryStatusLabel.font = .systemFont(ofSize: 11)
+        glossaryStatusLabel.textColor = .secondaryLabelColor
+        glossaryStatusLabel.lineBreakMode = .byTruncatingMiddle
+        content.addSubview(glossaryStatusLabel)
+
+        let chooseButton = NSButton(title: "Attach…", target: self, action: #selector(chooseGlossaryTapped))
+        chooseButton.bezelStyle = .rounded
+        chooseButton.frame = NSRect(x: fieldX + 150, y: 112, width: 82, height: 28)
+        content.addSubview(chooseButton)
+
+        let editButton = NSButton(title: "Edit", target: self, action: #selector(editGlossaryTapped))
+        editButton.bezelStyle = .rounded
+        editButton.frame = NSRect(x: fieldX + 236, y: 112, width: 74, height: 28)
+        content.addSubview(editButton)
 
         statusLabel.frame = NSRect(x: 16, y: 64, width: 424, height: 40)
         statusLabel.alignment = .left
@@ -122,11 +154,73 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         rebuildModelPopup(selecting: s.llmModel)
         applyProviderVisibility()
         refreshAPIKeyStatus()
+        refreshGlossaryStatus()
     }
 
-    /// Reflects whether the API key was found in the environment. Read-only: the
-    /// key is never entered or persisted here.
+    // MARK: - Glossary
+
+    private func refreshGlossaryStatus() {
+        let s = Settings.shared
+        let count = s.glossaryTerms.count
+        if count > 0 {
+            glossaryStatusLabel.stringValue = "✓ \(count) terms — \(s.glossaryURL.lastPathComponent)"
+            glossaryStatusLabel.textColor = .systemGreen
+        } else {
+            glossaryStatusLabel.stringValue = "None (optional)"
+            glossaryStatusLabel.textColor = .secondaryLabelColor
+        }
+    }
+
+    @objc private func chooseGlossaryTapped() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.plainText]
+        panel.message = "Choose a glossary text file (one term per line; \"wrong -> right\" maps a mis-transcription)"
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Settings.shared.glossaryURL = url
+            self?.refreshGlossaryStatus()
+        }
+    }
+
+    @objc private func editGlossaryTapped() {
+        let url = Settings.shared.glossaryURL
+        if !FileManager.default.fileExists(atPath: url.path) {
+            let template = """
+            # Mac Whisper glossary — one term per line.
+            # Lines starting with # are comments.
+            # Map a frequent mis-transcription with:  wrong -> right
+            # Examples:
+            # Vigloo
+            # 스푼라디오
+            # jooq -> jOOQ
+            """
+            try? FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? template.write(to: url, atomically: true, encoding: .utf8)
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Reflects the auth state for the selected provider: OAuth sign-in for the
+    /// ChatGPT subscription provider, otherwise whether the API key was found in
+    /// the environment. Read-only: the key is never entered or persisted here.
     private func refreshAPIKeyStatus() {
+        if selectedProvider.proto == .chatgpt {
+            apiKeyLabel.stringValue = "Account:"
+            if ChatGPTOAuth.shared.isSignedIn {
+                apiKeyStatusLabel.stringValue = "✓ Signed in with ChatGPT"
+                apiKeyStatusLabel.textColor = .systemGreen
+                chatgptAuthButton.title = "Sign out"
+            } else {
+                apiKeyStatusLabel.stringValue = "✗ Not signed in"
+                apiKeyStatusLabel.textColor = .systemRed
+                chatgptAuthButton.title = "Sign in with ChatGPT"
+            }
+            return
+        }
+        apiKeyLabel.stringValue = "API Key:"
         let name = Settings.apiKeyEnvName
         if Settings.shared.llmAPIKeyIsSet {
             apiKeyStatusLabel.stringValue = "✓ Set via $\(name)"
@@ -134,6 +228,32 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         } else {
             apiKeyStatusLabel.stringValue = "✗ Not set ($\(name) or ~/.config/macwhisper/.env)"
             apiKeyStatusLabel.textColor = .systemRed
+        }
+    }
+
+    @objc private func chatgptAuthTapped() {
+        if ChatGPTOAuth.shared.isSignedIn {
+            ChatGPTOAuth.shared.signOut()
+            refreshAPIKeyStatus()
+            statusLabel.textColor = .secondaryLabelColor
+            statusLabel.stringValue = "Signed out."
+            return
+        }
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.stringValue = "Complete the sign-in in your browser…"
+        ChatGPTOAuth.shared.signIn { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.refreshAPIKeyStatus()
+                switch result {
+                case .success:
+                    self.statusLabel.textColor = .systemGreen
+                    self.statusLabel.stringValue = "Signed in ✓"
+                case .failure(let error):
+                    self.statusLabel.textColor = .systemRed
+                    self.statusLabel.stringValue = "Sign-in failed: \(error.localizedDescription)"
+                }
+            }
         }
     }
 
@@ -159,6 +279,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         baseURLField.isEditable = custom
         baseURLField.isSelectable = custom
         baseURLField.textColor = custom ? .labelColor : .secondaryLabelColor
+        chatgptAuthButton.isHidden = selectedProvider.proto != .chatgpt
     }
 
     @objc private func providerChanged() {
@@ -175,6 +296,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             rebuildModelPopup(selecting: provider.defaultModel)
         }
         applyProviderVisibility()
+        refreshAPIKeyStatus()
         statusLabel.stringValue = ""
     }
 

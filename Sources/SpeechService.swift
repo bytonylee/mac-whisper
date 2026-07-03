@@ -29,6 +29,10 @@ final class SpeechService {
     /// Continuous silence (seconds) after speech that triggers the auto-stop.
     var silenceTimeout: TimeInterval = 2.5
 
+    /// User glossary terms passed to the recognizer as contextual hints so
+    /// domain-specific names/jargon are favored during recognition itself.
+    var contextualStrings: [String] = []
+
     private var audioEngine: AVAudioEngine?
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
@@ -120,6 +124,8 @@ final class SpeechService {
             return
         }
         self.recognizer = recognizer
+        currentLanguage = language
+        consecutiveErrorRestarts = 0
         NSLog("MacWhisper[Speech]: starting language=\(language.rawValue) onDevice=\(recognizer.supportsOnDeviceRecognition)")
 
         // Force the built-in mic for this session: capturing through a Bluetooth
@@ -222,6 +228,11 @@ final class SpeechService {
     /// Creates the recognition request + task. Extracted so a mid-hold segment
     /// finalization can transparently restart a fresh segment (see the callback).
     private var recognitionTaskCount = 0
+    /// Consecutive segment restarts caused by recognizer errors; used to decide
+    /// when the recognizer itself needs rebuilding. Reset on any real result.
+    private var consecutiveErrorRestarts = 0
+    /// Language of the running session, needed to rebuild a wedged recognizer.
+    private var currentLanguage: RecognitionLanguage?
     private func startRecognitionTask() {
         guard let recognizer else { return }
         recognitionTaskCount += 1
@@ -230,6 +241,9 @@ final class SpeechService {
         // Prefer on-device when supported for responsiveness/privacy.
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
+        }
+        if !contextualStrings.isEmpty {
+            request.contextualStrings = contextualStrings
         }
         self.request = request
         NSLog("MacWhisper[Speech][DEBUG]: startRecognitionTask #\(recognitionTaskCount) onDevice=\(request.requiresOnDeviceRecognition)")
@@ -249,12 +263,17 @@ final class SpeechService {
                 self.stateLock.unlock()
                 DispatchQueue.main.async { self.onTranscript?(combined) }
             }
+            if result != nil {
+                self.consecutiveErrorRestarts = 0
+            }
             if let error = error {
                 let nsError = error as NSError
                 NSLog("MacWhisper[Speech]: recognition error=\(error.localizedDescription) domain=\(nsError.domain) code=\(nsError.code)")
+                Self.diag("recognition error domain=\(nsError.domain) code=\(nsError.code) task=\(self.recognitionTaskCount)")
             }
             let segmentEnded = error != nil || (result?.isFinal ?? false)
             guard segmentEnded else { return }
+            let endedWithError = error != nil
 
             self.stateLock.lock()
             let stopping = self.isStopping
@@ -283,6 +302,29 @@ final class SpeechService {
                     self.request?.endAudio()
                     self.request = nil
                     self.stateLock.unlock()
+                    // Error-driven restarts (e.g. "no speech" timeouts during a
+                    // long leading silence) can leave the recognizer wedged so
+                    // every following task dies instantly and a long session
+                    // ends with an empty transcript. After a few in a row,
+                    // rebuild the recognizer itself.
+                    if endedWithError {
+                        self.consecutiveErrorRestarts += 1
+                        if self.consecutiveErrorRestarts % 3 == 0, let language = self.currentLanguage {
+                            Self.diag("rebuilding recognizer after \(self.consecutiveErrorRestarts) error restarts")
+                            self.recognizer = SFSpeechRecognizer(locale: language.locale)
+                        }
+                        // During a long pre-meeting silence the recognizer can
+                        // error out over and over; retrying instantly would spin
+                        // CPU for nothing (the audio backup keeps recording
+                        // regardless). Back off briefly, capped at 3 s so the
+                        // first words after the silence are still caught.
+                        let delay = min(Double(self.consecutiveErrorRestarts) * 0.5, 3.0)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                            guard self.isRunning, !self.isStopping else { return }
+                            self.startRecognitionTask()
+                        }
+                        return
+                    }
                     self.startRecognitionTask()
                 }
             }
@@ -296,8 +338,10 @@ final class SpeechService {
         if !seg.isEmpty {
             finalizedPrefix = finalizedPrefix.isEmpty ? seg : finalizedPrefix + " " + seg
         }
+        let total = finalizedPrefix.count
         latestTranscript = ""
         stateLock.unlock()
+        Self.diag("segment folded segChars=\(seg.count) totalChars=\(total)")
     }
 
     /// Starts the repeating timer that auto-stops the session after a sustained
@@ -452,7 +496,7 @@ final class SpeechService {
     /// Append a line to a diagnostics file so speech/VAD behavior can be inspected
     /// after a test run (unified-log NSLog args are redacted as <private>).
     private static let diagPath = "/tmp/macwhisper-diag.log"
-    private static func diag(_ message: String) {
+    static func diag(_ message: String) {
         let line = "\(Date()) \(message)\n"
         NSLog("MacWhisper[Speech]: \(message)")
         guard let data = line.data(using: .utf8) else { return }

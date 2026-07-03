@@ -20,16 +20,29 @@ enum TextInjector {
 
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+        // Remember our write so the deferred restore can tell whether anything
+        // else (the user, a clipboard manager) has touched the clipboard since.
+        let injectedChangeCount = pasteboard.changeCount
 
         // Give the input-source switch and clipboard write a moment to settle.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             simulatePaste()
 
-            // Restore input source and clipboard after the paste is delivered.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            // Restore the input source shortly after the paste is delivered.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 if didSwitch, let original = originalSource {
                     TISSelectInputSource(original)
                 }
+            }
+
+            // Restore the clipboard much later: the target app reads the
+            // pasteboard only when it processes the Cmd+V event, which can lag
+            // well past 100 ms in busy/Electron apps — restoring too early
+            // makes them paste the user's *old* clipboard instead of the
+            // transcript. Skip the restore entirely if someone else has
+            // written to the clipboard in the meantime.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                guard pasteboard.changeCount == injectedChangeCount else { return }
                 restoreClipboard(pasteboard, items: savedItems)
             }
         }
