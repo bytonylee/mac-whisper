@@ -67,12 +67,14 @@ final class FloatingPanel {
             glass.cornerRadius = cornerRadius
             // `.regular` is the full Liquid Glass material (frosting, refraction
             // and adaptive edge highlights) — the headline WWDC25 look. `.clear`
-            // renders as a near-invisible transparent gray, so use `.regular`. A
-            // subtle white tint emulates the reference `.liquidGlass-tint`
-            // (`rgba(255,255,255,0.25)`) milky glass without washing out the
-            // white transcript text.
+            // renders as a near-invisible transparent gray, so use `.regular`.
+            // Liquid Glass adapts its look to whatever is behind it, which means
+            // a light tint (the original design) turns the capsule near-white —
+            // and unreadable — over light backgrounds/pages. A dark tint biases
+            // it toward a consistently dark capsule regardless of what's behind,
+            // so the white transcript/waveform stay legible everywhere.
             glass.style = .regular
-            glass.tintColor = NSColor.white.withAlphaComponent(0.12)
+            glass.tintColor = NSColor.black.withAlphaComponent(0.55)
             glass.autoresizingMask = [.width, .height]
             glass.wantsLayer = true
             backgroundView = glass
@@ -102,6 +104,13 @@ final class FloatingPanel {
         // Liquid-glass "shine": a bright inset rim drawn just inside the capsule
         // edge, mirroring the reference CSS inset white box-shadow.
         contentHost.wantsLayer = true
+        // Liquid Glass's tint alone isn't enough to guarantee contrast — it still
+        // lightens noticeably over bright content. A solid dark scrim behind the
+        // waveform/text guarantees legibility regardless of what's underneath,
+        // while the glass blur/refraction still shows through at ~28% opacity.
+        contentHost.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.72).cgColor
+        contentHost.layer?.cornerRadius = cornerRadius
+        contentHost.layer?.masksToBounds = true
         shineLayer.fillColor = NSColor.clear.cgColor
         shineLayer.strokeColor = NSColor.white.withAlphaComponent(0.5).cgColor
         shineLayer.lineWidth = 1.5
