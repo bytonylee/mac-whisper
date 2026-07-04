@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.0.2-111111?style=flat-square" alt="Version 0.0.2">
+  <img src="https://img.shields.io/badge/version-0.0.3-111111?style=flat-square" alt="Version 0.0.3">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/macOS-26%2B-111111?style=flat-square" alt="macOS 26+">
   <img src="https://img.shields.io/badge/Swift-5.9-111111?style=flat-square" alt="Swift 5.9">
@@ -193,9 +193,9 @@ injection, and audio routing depend on system state.
 
 ## Release
 
-Current tag: [`v0.0.2`](https://github.com/bytonylee/mac-whisper/releases/tag/v0.0.2)
+Current tag: [`v0.0.3`](https://github.com/bytonylee/mac-whisper/releases/tag/v0.0.3)
 
-The `v0.0.2` release includes push-to-talk dictation, the floating transcript
+The `v0.0.3` release includes push-to-talk dictation, the floating transcript
 HUD, language selection, optional LLM cleanup, local build scripts, DMG
 packaging, mid-hold restart fixes, and refreshed permissions UX.
 
