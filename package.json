@@ -5,12 +5,12 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build": "make build",
-    "app": "make app",
-    "dmg": "make dmg",
-    "run": "make run",
-    "install-app": "make install",
-    "cert": "make cert",
-    "clean": "make clean"
+    "build": "./build.sh build",
+    "app": "./build.sh app",
+    "dmg": "./build.sh dmg",
+    "run": "./build.sh run",
+    "install-app": "./build.sh install",
+    "cert": "./build.sh cert",
+    "clean": "./build.sh clean"
   }
 }
