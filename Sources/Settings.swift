@@ -50,7 +50,7 @@ final class Settings {
     /// Environment variable name holding the LLM API key. Set it via
     /// `launchctl setenv MACWHISPER_LLM_API_KEY <key>` (persists for GUI launches)
     /// or place `MACWHISPER_LLM_API_KEY=<key>` in `~/.config/macwhisper/.env`.
-    /// For development, a repo-local `.env` (gitignored) is sourced by `make run`.
+    /// For development, a repo-local `.env` (gitignored) is sourced by `./build.sh run`.
     static let apiKeyEnvName = "MACWHISPER_LLM_API_KEY"
 
     /// Path to an optional user-level env file consulted when the process
@@ -143,7 +143,7 @@ final class Settings {
     /// UserDefaults (a plaintext plist on disk). Resolution order:
     ///   1. `MACWHISPER_LLM_API_KEY` in the process environment
     ///      (set via `launchctl setenv`, or inherited when launched from a shell
-    ///      that sourced the repo `.env` — e.g. `make run`).
+    ///      that sourced the repo `.env` — e.g. `./build.sh run`).
     ///   2. `MACWHISPER_LLM_API_KEY` in `~/.config/macwhisper/.env`.
     /// Returns "" when not found. Read-only; there is no setter.
     var llmAPIKey: String {
