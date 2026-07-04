@@ -85,7 +85,7 @@ macOS 받아쓰기는 쓸 만하지만, 모든 앱에서 짧게 눌러 말하고
 ```bash
 git clone https://github.com/bytonylee/mac-whisper.git
 cd mac-whisper
-make app
+./build.sh
 open "build/Mac Whisper.app"
 ```
 
@@ -101,8 +101,8 @@ open "build/Mac Whisper.app"
 로컬 리빌드 후에도 권한을 유지하려면 자체 서명 인증서를 한 번 만드세요.
 
 ```bash
-make cert
-make app
+./build.sh cert
+./build.sh
 ```
 
 이 인증서가 없으면 임시 서명 때문에 macOS가 리빌드할 때마다 입력 모니터링과
@@ -123,7 +123,7 @@ LLM 정리에 쓰는 API 키는 환경 변수에서 읽습니다.
 cp .env.example .env
 # .env 편집:
 #   MACWHISPER_LLM_API_KEY=sk-...
-make run
+./build.sh run
 ```
 
 Finder에서 실행하는 설치 앱은 아래 명령을 사용할 수 있습니다.
@@ -139,19 +139,19 @@ launchctl setenv MACWHISPER_LLM_API_KEY sk-...
 컴파일:
 
 ```bash
-make build
+./build.sh build
 ```
 
 빌드 후 실행:
 
 ```bash
-make run
+./build.sh run
 ```
 
 DMG 생성:
 
 ```bash
-make dmg
+./build.sh dmg
 ```
 
 ## 에이전트용
@@ -160,7 +160,7 @@ make dmg
 
 ```bash
 cd /path/to/mac-whisper
-make app
+./build.sh
 open "build/Mac Whisper.app"
 ```
 
