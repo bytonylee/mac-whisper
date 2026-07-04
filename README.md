@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.0.2-111111?style=flat-square" alt="Version 0.0.2">
+  <img src="https://img.shields.io/badge/version-0.0.3-111111?style=flat-square" alt="Version 0.0.3">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/macOS-26%2B-111111?style=flat-square" alt="macOS 26+">
   <img src="https://img.shields.io/badge/Swift-5.9-111111?style=flat-square" alt="Swift 5.9">
@@ -87,7 +87,7 @@ Or build the app locally:
 ```bash
 git clone https://github.com/bytonylee/mac-whisper.git
 cd mac-whisper
-make app
+./build.sh
 open "build/Mac Whisper.app"
 ```
 
@@ -104,8 +104,8 @@ For stable local permissions across rebuilds, create a self-signed signing
 identity once:
 
 ```bash
-make cert
-make app
+./build.sh cert
+./build.sh
 ```
 
 Without that identity, ad hoc signing can make macOS ask for Input Monitoring
@@ -126,7 +126,7 @@ The API key for LLM refinement comes from the environment:
 cp .env.example .env
 # edit .env:
 #   MACWHISPER_LLM_API_KEY=sk-...
-make run
+./build.sh run
 ```
 
 Installed apps launched from Finder can use:
@@ -142,19 +142,19 @@ You can also put the same line in `~/.config/macwhisper/.env`.
 Compile:
 
 ```bash
-make build
+./build.sh build
 ```
 
 Build and launch:
 
 ```bash
-make run
+./build.sh run
 ```
 
 Create a DMG:
 
 ```bash
-make dmg
+./build.sh dmg
 ```
 
 ## For agents
@@ -163,7 +163,7 @@ One-time setup to build and launch the app:
 
 ```bash
 cd /path/to/mac-whisper
-make app
+./build.sh
 open "build/Mac Whisper.app"
 ```
 
@@ -193,9 +193,9 @@ injection, and audio routing depend on system state.
 
 ## Release
 
-Current tag: [`v0.0.2`](https://github.com/bytonylee/mac-whisper/releases/tag/v0.0.2)
+Current tag: [`v0.0.3`](https://github.com/bytonylee/mac-whisper/releases/tag/v0.0.3)
 
-The `v0.0.2` release includes push-to-talk dictation, the floating transcript
+The `v0.0.3` release includes push-to-talk dictation, the floating transcript
 HUD, language selection, optional LLM cleanup, local build scripts, DMG
 packaging, mid-hold restart fixes, and refreshed permissions UX.
 

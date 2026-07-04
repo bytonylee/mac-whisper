@@ -1,6 +1,102 @@
 import Cocoa
 import QuartzCore
 
+private final class GradientTextView: NSView {
+    private static let gradientMotionKey = "gradientMotion"
+
+    private let gradientLayer = CAGradientLayer()
+    private let textLayer = CATextLayer()
+
+    var stringValue = "" { didSet { updateText() } }
+    var font: NSFont { didSet { updateText() } }
+    var alignment: NSTextAlignment = .left {
+        didSet {
+            updateAlignment()
+            updateText()
+        }
+    }
+
+    init(font: NSFont) {
+        self.font = font
+        super.init(frame: .zero)
+
+        wantsLayer = true
+        layer = CALayer()
+        layer?.masksToBounds = false
+
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0.5)
+        gradientLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        gradientLayer.colors = [
+            NSColor.white.withAlphaComponent(0.96).cgColor,
+            NSColor(calibratedRed: 0.72, green: 0.92, blue: 1.0, alpha: 1.0).cgColor,
+            NSColor.white.withAlphaComponent(0.96).cgColor
+        ]
+        gradientLayer.locations = [0, 0.55, 1]
+        gradientLayer.mask = textLayer
+        layer?.addSublayer(gradientLayer)
+
+        textLayer.isWrapped = false
+        textLayer.truncationMode = .none
+        updateAlignment()
+        updateText()
+        syncLayerFrames()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func setGradientMotionEnabled(_ enabled: Bool) {
+        if enabled {
+            guard gradientLayer.animation(forKey: Self.gradientMotionKey) == nil else { return }
+            let animation = CABasicAnimation(keyPath: "locations")
+            animation.fromValue = [-0.8, -0.35, 0.1]
+            animation.toValue = [0.9, 1.35, 1.8]
+            animation.duration = 1.6
+            animation.repeatCount = .infinity
+            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            gradientLayer.add(animation, forKey: Self.gradientMotionKey)
+        } else {
+            gradientLayer.removeAnimation(forKey: Self.gradientMotionKey)
+            gradientLayer.locations = [0, 0.55, 1]
+        }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        syncLayerFrames()
+    }
+
+    override func layout() {
+        super.layout()
+        syncLayerFrames()
+    }
+
+    private func syncLayerFrames() {
+        gradientLayer.frame = bounds
+        textLayer.frame = bounds
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        gradientLayer.contentsScale = scale
+        textLayer.contentsScale = scale
+    }
+
+    private func updateAlignment() {
+        textLayer.alignmentMode = alignment == .center ? .center : .left
+    }
+
+    private func updateText() {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = alignment
+        paragraph.lineBreakMode = .byClipping
+        textLayer.string = NSAttributedString(
+            string: stringValue,
+            attributes: [
+                .font: font,
+                .foregroundColor: NSColor.white,
+                .paragraphStyle: paragraph
+            ]
+        )
+    }
+}
+
 /// Frameless, capsule-shaped floating HUD shown while recording. Uses a non-activating
 /// NSPanel + NSVisualEffectView (hudWindow material) so it never steals focus from the
 /// target input field. Hosts the waveform on the left and the live transcript on the right,
@@ -15,7 +111,8 @@ final class FloatingPanel {
     /// `contentView`; on the fallback it is a plain subview of the effect view.
     private let contentHost: NSView
     private let waveform: WaveformView
-    private let textField: NSTextField
+    private let textClipView: NSView
+    private let textField: GradientTextView
     /// Luminous inset rim emulating the CSS `.liquidGlass-shine` highlight
     /// (`box-shadow: inset … rgba(255,255,255,0.5)`) from the reference recipe.
     private let shineLayer = CAShapeLayer()
@@ -26,15 +123,15 @@ final class FloatingPanel {
     private let waveWidth: CGFloat = 44
     private let waveHeight: CGFloat = 32
     private let gap: CGFloat = 12
+    private let rightPadding: CGFloat = 10
     private let minTextWidth: CGFloat = 160
     private let maxTextWidth: CGFloat = 560
     private let bottomMargin: CGFloat = 130
 
-    /// Horizontal space reserved on each side of the transcript so it stays
-    /// centered in the capsule (the waveform sits inside the left inset).
-    private var sideInset: CGFloat { leftPadding + waveWidth + gap }
+    private var textX: CGFloat { leftPadding + waveWidth + gap }
 
     private let textFont = NSFont.systemFont(ofSize: 16, weight: .medium)
+    private var lockedVisibleWidth: CGFloat = 0
 
     /// Natural height of a single line of the transcript font, used to vertically
     /// center the text within the capsule.
@@ -42,7 +139,7 @@ final class FloatingPanel {
     private var textY: CGFloat { (panelHeight - textHeight) / 2 }
 
     init() {
-        let initialWidth = (leftPadding + waveWidth + gap) * 2 + minTextWidth
+        let initialWidth = leftPadding + waveWidth + gap + minTextWidth + rightPadding
         let rect = NSRect(x: 0, y: 0, width: initialWidth, height: panelHeight)
 
         panel = NSPanel(
@@ -128,34 +225,34 @@ final class FloatingPanel {
         waveform.autoresizingMask = [.maxXMargin]
         contentHost.addSubview(waveform)
 
-        textField = NSTextField(labelWithString: "")
-        textField.font = textFont
-        textField.textColor = .white
-        textField.backgroundColor = .clear
-        textField.isBezeled = false
-        textField.isEditable = false
-        textField.isSelectable = false
-        textField.drawsBackground = false
-        textField.lineBreakMode = .byTruncatingTail
-        textField.maximumNumberOfLines = 1
-        textField.cell?.usesSingleLineMode = true
-        textField.frame = NSRect(
-            x: leftPadding + waveWidth + gap,
+        textClipView = NSView(frame: .zero)
+        textClipView.wantsLayer = true
+        textClipView.layer?.masksToBounds = true
+        textClipView.autoresizingMask = [.maxXMargin, .minYMargin, .maxYMargin]
+        contentHost.addSubview(textClipView)
+
+        textField = GradientTextView(font: textFont)
+        let textFrame = NSRect(
+            x: textX,
             y: textY,
             width: minTextWidth,
             height: textHeight
         )
-        (textField.cell as? NSTextFieldCell)?.alignment = .center
+        textClipView.frame = textFrame
+        textField.frame = NSRect(origin: .zero, size: textFrame.size)
         // Frame is managed explicitly in resize(); keep left origin fixed.
         textField.autoresizingMask = [.maxXMargin, .minYMargin, .maxYMargin]
-        contentHost.addSubview(textField)
+        textClipView.addSubview(textField)
     }
 
     // MARK: - Presentation
 
     func show(placeholder: String) {
+        lockedVisibleWidth = 0
+        textField.alignment = .center
         textField.stringValue = placeholder
         textField.alphaValue = 0.55
+        textField.setGradientMotionEnabled(true)
         resize(toTextWidth: minTextWidth, animated: false)
         position()
 
@@ -189,14 +286,18 @@ final class FloatingPanel {
     /// Live transcript update — elastically resizes the capsule to fit the text.
     func updateText(_ text: String) {
         textField.alphaValue = 1.0
-        textField.stringValue = text
-        let needed = measuredTextWidth(text)
+        textField.alignment = .left
+        textField.setGradientMotionEnabled(false)
+        textField.stringValue = displayText(for: text)
+        let needed = measuredTextWidth(textField.stringValue)
         resize(toTextWidth: needed, animated: true)
     }
 
     /// Show a transient status (e.g., "Refining…") with a slightly dimmed style.
     func showStatus(_ status: String) {
         textField.alphaValue = 0.7
+        textField.alignment = .center
+        textField.setGradientMotionEnabled(false)
         textField.stringValue = status
         let needed = measuredTextWidth(status)
         resize(toTextWidth: needed, animated: true)
@@ -204,6 +305,7 @@ final class FloatingPanel {
 
     func hide(completion: (() -> Void)? = nil) {
         waveform.stopAnimating()
+        textField.setGradientMotionEnabled(false)
         if let layer = backgroundView.layer {
             let scale = CABasicAnimation(keyPath: "transform.scale")
             scale.fromValue = 1.0
@@ -229,23 +331,53 @@ final class FloatingPanel {
     private func measuredTextWidth(_ text: String) -> CGFloat {
         let attr = [NSAttributedString.Key.font: textFont]
         let size = (text as NSString).size(withAttributes: attr)
-        return min(maxTextWidth, max(minTextWidth, ceil(size.width) + 8))
+        return ceil(size.width) + 8
     }
 
-    private func resize(toTextWidth textWidth: CGFloat, animated: Bool) {
-        let totalWidth = sideInset * 2 + textWidth
+    private func displayText(for text: String) -> String {
+        guard measuredTextWidth(text) > maxTextWidth else { return text }
+
+        let prefix = "... "
+        let characters = Array(text)
+        var low = 0
+        var high = characters.count
+        var best = prefix
+
+        while low <= high {
+            let count = (low + high) / 2
+            let candidate = prefix + String(characters.suffix(count))
+            if measuredTextWidth(candidate) <= maxTextWidth {
+                best = candidate
+                low = count + 1
+            } else {
+                high = count - 1
+            }
+        }
+
+        return best
+    }
+
+    private func resize(toTextWidth rawWidth: CGFloat, animated: Bool) {
+        let visibleWidth = max(lockedVisibleWidth, min(maxTextWidth, max(minTextWidth, rawWidth)))
+        lockedVisibleWidth = visibleWidth
+        let totalWidth = textX + visibleWidth + rightPadding
         var frame = panel.frame
         // Keep horizontally centered while growing.
         let centerX = frame.midX
         frame.size.width = totalWidth
         frame.origin.x = centerX - totalWidth / 2
 
-        textField.frame = NSRect(
-            x: sideInset,
+        textClipView.frame = NSRect(
+            x: textX,
             y: textY,
-            width: textWidth,
+            width: visibleWidth,
             height: textHeight
         )
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        textField.frame = NSRect(x: 0, y: 0, width: visibleWidth, height: textHeight)
+        textField.layer?.removeAnimation(forKey: "scrollText")
+        CATransaction.commit()
 
         if animated {
             NSAnimationContext.runAnimationGroup { ctx in
