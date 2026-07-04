@@ -87,7 +87,7 @@ Or build the app locally:
 ```bash
 git clone https://github.com/bytonylee/mac-whisper.git
 cd mac-whisper
-make app
+./build.sh
 open "build/Mac Whisper.app"
 ```
 
@@ -104,8 +104,8 @@ For stable local permissions across rebuilds, create a self-signed signing
 identity once:
 
 ```bash
-make cert
-make app
+./build.sh cert
+./build.sh
 ```
 
 Without that identity, ad hoc signing can make macOS ask for Input Monitoring
@@ -126,7 +126,7 @@ The API key for LLM refinement comes from the environment:
 cp .env.example .env
 # edit .env:
 #   MACWHISPER_LLM_API_KEY=sk-...
-make run
+./build.sh run
 ```
 
 Installed apps launched from Finder can use:
@@ -142,19 +142,19 @@ You can also put the same line in `~/.config/macwhisper/.env`.
 Compile:
 
 ```bash
-make build
+./build.sh build
 ```
 
 Build and launch:
 
 ```bash
-make run
+./build.sh run
 ```
 
 Create a DMG:
 
 ```bash
-make dmg
+./build.sh dmg
 ```
 
 ## For agents
@@ -163,7 +163,7 @@ One-time setup to build and launch the app:
 
 ```bash
 cd /path/to/mac-whisper
-make app
+./build.sh
 open "build/Mac Whisper.app"
 ```
 
