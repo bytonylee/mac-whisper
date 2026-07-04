@@ -35,6 +35,7 @@ final class SpeechService {
     private var task: SFSpeechRecognitionTask?
 
     private var latestTranscript = ""
+    private var lastDeliveredTranscript = ""
     /// Text from recognition segments the recognizer already finalized mid-hold
     /// (it auto-finalizes after pauses); accumulated so push-to-talk dictation
     /// survives across pauses instead of ending the session.
@@ -106,6 +107,7 @@ final class SpeechService {
         stopFallback = nil
         isStarting = true
         latestTranscript = ""
+        lastDeliveredTranscript = ""
         finalizedPrefix = ""
         isStopping = false
         didFinish = false
@@ -246,8 +248,17 @@ final class SpeechService {
                 self.stateLock.lock()
                 self.latestTranscript = result.bestTranscription.formattedString
                 let combined = self.combinedTranscript
+                let transcriptToDisplay: String?
+                if !combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.lastDeliveredTranscript = combined
+                    transcriptToDisplay = combined
+                } else {
+                    transcriptToDisplay = nil
+                }
                 self.stateLock.unlock()
-                DispatchQueue.main.async { self.onTranscript?(combined) }
+                if let transcriptToDisplay {
+                    DispatchQueue.main.async { self.onTranscript?(transcriptToDisplay) }
+                }
             }
             if let error = error {
                 let nsError = error as NSError
@@ -389,7 +400,10 @@ final class SpeechService {
         silenceTimer?.invalidate()
         silenceTimer = nil
         stateLock.lock()
-        let transcript = combinedTranscript
+        let combined = combinedTranscript
+        let combinedTrimmed = combined.trimmingCharacters(in: .whitespacesAndNewlines)
+        let deliveredTrimmed = lastDeliveredTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let transcript = deliveredTrimmed.count > combinedTrimmed.count ? lastDeliveredTranscript : combined
         stateLock.unlock()
         NSLog("MacWhisper[Speech][DEBUG]: finish() transcript.len=\(transcript.count) peak=\(sessionPeakLevel) detectedVoice=\(hasDetectedVoice) taskCount=\(recognitionTaskCount)")
         // Log only metadata, never the transcript text — speech content is PII and
@@ -424,6 +438,7 @@ final class SpeechService {
     func reset() {
         stateLock.lock()
         latestTranscript = ""
+        lastDeliveredTranscript = ""
         finalizedPrefix = ""
         isStopping = false
         stateLock.unlock()
