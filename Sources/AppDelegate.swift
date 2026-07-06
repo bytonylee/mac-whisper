@@ -18,6 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         requestPermissionsAndStart()
         wireSpeech()
+        DispatchQueue.global(qos: .utility).async {
+            SystemAudio.useBuiltInInput()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -160,8 +163,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         speech.onLevel = { [weak self] level in self?.panel.updateLevel(level) }
         speech.onTranscript = { [weak self] text in self?.panel.updateText(text) }
         speech.onFinished = { [weak self] text in self?.handleFinalTranscript(text) }
-        // Silence auto-stop (VAD) ends the session via the same path as Fn-release.
-        speech.onAutoStop = { [weak self] in self?.stopRecording() }
+        // Silence auto-stop is only a safety net when Fn is no longer held. While
+        // Fn is down, pauses must not split push-to-talk dictation into sessions.
+        speech.onAutoStop = { [weak self] in
+            guard let self, !self.fnMonitor.fnDown else { return }
+            self.stopRecording()
+        }
     }
 
     // MARK: - Recording cycle
