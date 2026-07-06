@@ -35,6 +35,8 @@ final class SpeechService {
     private var task: SFSpeechRecognitionTask?
 
     private var latestTranscript = ""
+    private var latestTranscriptEndTime: TimeInterval?
+    private var latestTranscriptUpdatedAt: Date?
     private var lastDeliveredTranscript = ""
     /// Text from recognition segments the recognizer already finalized mid-hold
     /// (it auto-finalizes after pauses); accumulated so push-to-talk dictation
@@ -55,6 +57,9 @@ final class SpeechService {
     /// Cancellable wrapper around the stop() fallback timer so cancel() can kill
     /// it; DispatchQueue.main.asyncAfter returns nothing we can cancel.
     private var stopFallback: DispatchWorkItem?
+    /// Identifier for the recognition task currently allowed to mutate transcript
+    /// state. Late callbacks from recycled tasks are ignored.
+    private var activeRecognitionTaskID = 0
 
     /// Serializes access to the fields touched from both the audio tap thread and
     /// the recognition callback thread (vs. main-thread methods). Without this,
@@ -70,6 +75,8 @@ final class SpeechService {
     private var silenceTimer: Timer?
     private var lastVoiceAt = Date()
     private var hasDetectedVoice = false
+    private var hasFoldedCurrentSilence = false
+    private var hasRequestedAutoStopCurrentSilence = false
     /// Loudest level seen this session, written to the diagnostics log so the
     /// voice threshold can be calibrated against real mic input.
     private var sessionPeakLevel: Float = 0
@@ -107,11 +114,16 @@ final class SpeechService {
         stopFallback = nil
         isStarting = true
         latestTranscript = ""
+        latestTranscriptEndTime = nil
+        latestTranscriptUpdatedAt = nil
         lastDeliveredTranscript = ""
         finalizedPrefix = ""
+        activeRecognitionTaskID = 0
         isStopping = false
         didFinish = false
         hasDetectedVoice = false
+        hasFoldedCurrentSilence = false
+        hasRequestedAutoStopCurrentSilence = false
         sessionPeakLevel = 0
         lastVoiceAt = Date()
         Self.diag("session start lang=\(language.rawValue) autoStop=\(silenceAutoStopEnabled) thr=\(silenceThreshold)")
@@ -193,8 +205,12 @@ final class SpeechService {
             req?.append(buffer)
 
             if voiceActive {
+                self.stateLock.lock()
                 self.hasDetectedVoice = true
                 self.lastVoiceAt = Date()
+                self.hasFoldedCurrentSilence = false
+                self.hasRequestedAutoStopCurrentSilence = false
+                self.stateLock.unlock()
             }
             // Throttle level dispatches to ~50 Hz (the waveform animates at 60 Hz;
             // the tap fires ~86 Hz) so we don't flood the main queue.
@@ -227,13 +243,17 @@ final class SpeechService {
     private func startRecognitionTask() {
         guard let recognizer else { return }
         recognitionTaskCount += 1
+        let taskID = recognitionTaskCount
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         // Prefer on-device when supported for responsiveness/privacy.
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
         }
+        stateLock.lock()
         self.request = request
+        activeRecognitionTaskID = taskID
+        stateLock.unlock()
         NSLog("MacWhisper[Speech][DEBUG]: startRecognitionTask #\(recognitionTaskCount) onDevice=\(request.requiresOnDeviceRecognition)")
 
         // Capture the generation this task belongs to so a late callback from a
@@ -241,17 +261,45 @@ final class SpeechService {
         let taskGen = gen
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
+            self.stateLock.lock()
+            let active = self.activeRecognitionTaskID == taskID
+            self.stateLock.unlock()
+            guard active else { return }
             if let result {
                 if Self.debugLogging {
                     NSLog("MacWhisper[Speech][DEBUG]: callback result isFinal=\(result.isFinal) text='\(result.bestTranscription.formattedString)'")
                 }
+                let transcription = result.bestTranscription
+                let nextTranscript = transcription.formattedString
+                let firstTimestamp = transcription.segments.first?.timestamp
+                let endTimestamp = transcription.segments
+                    .map { $0.timestamp + $0.duration }
+                    .max()
+                let callbackAt = Date()
                 self.stateLock.lock()
-                self.latestTranscript = result.bestTranscription.formattedString
+                let nextTrimmed = nextTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                let currentTrimmed = self.latestTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                let finalizedTrimmed = self.finalizedPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+                let staleFoldRepeat = self.hasFoldedCurrentSilence &&
+                    currentTrimmed.isEmpty &&
+                    !nextTrimmed.isEmpty &&
+                    finalizedTrimmed.hasSuffix(nextTrimmed)
+                if (!nextTrimmed.isEmpty || currentTrimmed.isEmpty) && !staleFoldRepeat {
+                    if self.shouldFoldBeforeReplacingLatest(
+                        with: nextTranscript,
+                        firstTimestamp: firstTimestamp,
+                        callbackAt: callbackAt
+                    ) {
+                        self.foldLatestTranscriptLocked()
+                    }
+                    self.latestTranscript = nextTranscript
+                    self.latestTranscriptEndTime = endTimestamp
+                    self.latestTranscriptUpdatedAt = nextTrimmed.isEmpty ? nil : callbackAt
+                }
                 let combined = self.combinedTranscript
                 let transcriptToDisplay: String?
                 if !combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    self.lastDeliveredTranscript = combined
-                    transcriptToDisplay = combined
+                    transcriptToDisplay = self.rememberedTranscriptLocked(preferred: combined)
                 } else {
                     transcriptToDisplay = nil
                 }
@@ -282,41 +330,76 @@ final class SpeechService {
                 NSLog("MacWhisper[Speech][DEBUG]: segment ended, not stopping -> restart")
                 DispatchQueue.main.async {
                     guard self.isRunning, !self.isStopping else { return }
-                    self.foldFinalizedSegment()
+                    self.stateLock.lock()
+                    guard self.activeRecognitionTaskID == taskID else {
+                        self.stateLock.unlock()
+                        return
+                    }
+                    self.foldLatestTranscriptLocked()
+                    self.activeRecognitionTaskID = 0
+                    let taskToCancel = self.task
+                    let requestToEnd = self.request
+                    self.task = nil
+                    self.request = nil
+                    self.stateLock.unlock()
                     // Cancel/end the finalized segment's task+request before
                     // starting a fresh one. The segment is "final" but the
                     // underlying Speech framework objects can still hold internal
                     // buffers until explicitly ended; over a long hold with many
                     // pause-driven finalizations this previously leaked memory.
-                    self.stateLock.lock()
-                    self.task?.cancel()
-                    self.task = nil
-                    self.request?.endAudio()
-                    self.request = nil
-                    self.stateLock.unlock()
+                    taskToCancel?.cancel()
+                    requestToEnd?.endAudio()
                     self.startRecognitionTask()
                 }
             }
         }
     }
 
-    /// Move the in-progress segment text into the accumulated finalized prefix.
-    private func foldFinalizedSegment() {
-        stateLock.lock()
+    private func shouldFoldBeforeReplacingLatest(
+        with nextTranscript: String,
+        firstTimestamp: TimeInterval?,
+        callbackAt: Date
+    ) -> Bool {
+        let current = latestTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next = nextTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !current.isEmpty, !next.isEmpty else { return false }
+        guard !next.hasPrefix(current) else { return false }
+        if let currentEnd = latestTranscriptEndTime,
+           let nextStart = firstTimestamp,
+           nextStart - currentEnd >= 0.8 {
+            return true
+        }
+        if let updatedAt = latestTranscriptUpdatedAt,
+           callbackAt.timeIntervalSince(updatedAt) >= 0.8 {
+            return true
+        }
+        return false
+    }
+
+    private func foldLatestTranscriptLocked() {
         let seg = latestTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
         if !seg.isEmpty {
             finalizedPrefix = finalizedPrefix.isEmpty ? seg : finalizedPrefix + " " + seg
         }
         latestTranscript = ""
-        stateLock.unlock()
+        latestTranscriptEndTime = nil
+        latestTranscriptUpdatedAt = nil
     }
 
-    /// Starts the repeating timer that auto-stops the session after a sustained
-    /// silence once the user has actually spoken (VAD). Also serves as a safety
-    /// net if an Fn key-up HID event is ever missed.
+    private func rememberedTranscriptLocked(preferred transcript: String) -> String {
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let deliveredTrimmed = lastDeliveredTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= deliveredTrimmed.count else { return lastDeliveredTranscript }
+        lastDeliveredTranscript = transcript
+        return transcript
+    }
+
+    /// Starts the repeating timer that marks sustained-silence boundaries. Those
+    /// boundaries commit the current partial into session memory so a Speech
+    /// refresh after a long pause cannot erase text recorded during the same Fn
+    /// hold. When enabled, the same boundary also requests auto-stop.
     private func startSilenceMonitor() {
         silenceTimer?.invalidate()
-        guard silenceAutoStopEnabled else { return }
         let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
             self?.checkSilence()
         }
@@ -325,11 +408,48 @@ final class SpeechService {
     }
 
     private func checkSilence() {
-        guard isRunning, !isStopping, hasDetectedVoice else { return }
-        guard Date().timeIntervalSince(lastVoiceAt) >= silenceTimeout else { return }
+        guard isRunning, !isStopping else { return }
+        stateLock.lock()
+        let silenceElapsed = hasDetectedVoice && Date().timeIntervalSince(lastVoiceAt) >= silenceTimeout
+        stateLock.unlock()
+        guard silenceElapsed else { return }
+        var transcriptToDisplay: String?
+        var taskToCancel: SFSpeechRecognitionTask?
+        var requestToEnd: SFSpeechAudioBufferRecognitionRequest?
+        var shouldRestartRecognition = false
+        stateLock.lock()
+        if !hasFoldedCurrentSilence {
+            foldLatestTranscriptLocked()
+            let combined = combinedTranscript
+            if !combined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                transcriptToDisplay = rememberedTranscriptLocked(preferred: combined)
+            }
+            hasFoldedCurrentSilence = true
+            activeRecognitionTaskID = 0
+            taskToCancel = task
+            requestToEnd = request
+            task = nil
+            request = nil
+            shouldRestartRecognition = true
+        }
+        let shouldAutoStop = silenceAutoStopEnabled && !hasRequestedAutoStopCurrentSilence
+        if shouldAutoStop {
+            hasRequestedAutoStopCurrentSilence = true
+        }
+        stateLock.unlock()
+        if let transcriptToDisplay {
+            onTranscript?(transcriptToDisplay)
+        }
+        if shouldRestartRecognition {
+            Self.diag("silence boundary folded chars=\(transcriptToDisplay?.count ?? 0) restartingTask=true")
+        }
+        taskToCancel?.cancel()
+        requestToEnd?.endAudio()
+        if shouldRestartRecognition, isRunning, !isStopping {
+            startRecognitionTask()
+        }
+        guard shouldAutoStop else { return }
         NSLog("MacWhisper[Speech]: silence auto-stop after \(silenceTimeout)s")
-        silenceTimer?.invalidate()
-        silenceTimer = nil
         onAutoStop?()
     }
 
@@ -417,10 +537,12 @@ final class SpeechService {
         silenceTimer?.invalidate()
         silenceTimer = nil
         stateLock.lock()
-        task?.cancel()
+        activeRecognitionTaskID = 0
+        let taskToCancel = task
         task = nil
         request = nil
         stateLock.unlock()
+        taskToCancel?.cancel()
         if let engine = audioEngine {
             if engine.isRunning {
                 engine.inputNode.removeTap(onBus: 0)
@@ -438,12 +560,17 @@ final class SpeechService {
     func reset() {
         stateLock.lock()
         latestTranscript = ""
+        latestTranscriptEndTime = nil
+        latestTranscriptUpdatedAt = nil
         lastDeliveredTranscript = ""
         finalizedPrefix = ""
+        activeRecognitionTaskID = 0
         isStopping = false
         stateLock.unlock()
         didFinish = false
         hasDetectedVoice = false
+        hasFoldedCurrentSilence = false
+        hasRequestedAutoStopCurrentSilence = false
     }
 
     /// Normalized 0...1 RMS level of a capture buffer, used for both the waveform
