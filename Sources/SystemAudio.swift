@@ -31,6 +31,7 @@ enum SystemAudio {
     /// The default input device that was active before we forced the built-in mic,
     /// so it can be restored exactly. nil means we didn't change it.
     private static var savedInputDevice: AudioDeviceID?
+    private static let inputSwitchLock = NSLock()
 
     /// Mute the current default output device. Safe to call repeatedly.
     static func muteOutput() {
@@ -66,6 +67,8 @@ enum SystemAudio {
     /// global default input on every Fn press/release raced the next session and
     /// intermittently left the engine bound to the wrong device.
     static func useBuiltInInput() {
+        inputSwitchLock.lock()
+        defer { inputSwitchLock.unlock() }
         guard let builtIn = builtInInputDeviceID() else {
             diag("built-in mic not found; leaving default input")
             return
@@ -91,6 +94,8 @@ enum SystemAudio {
 
     /// Restore the input device we replaced in `useBuiltInInput()`.
     static func restoreInput() {
+        inputSwitchLock.lock()
+        defer { inputSwitchLock.unlock() }
         guard let previous = savedInputDevice else { return }
         savedInputDevice = nil
         let ok = setDefaultInputDevice(previous)
