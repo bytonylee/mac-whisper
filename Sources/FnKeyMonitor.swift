@@ -13,7 +13,7 @@ final class FnKeyMonitor {
     var onFnUp: (() -> Void)?
 
     private var manager: IOHIDManager?
-    private var fnDown = false
+    private(set) var fnDown = false
 
     /// AppleVendor top-case page + KeyboardFn usage that report the Globe/Fn key.
     private let fnUsagePage: UInt32 = 0xFF
